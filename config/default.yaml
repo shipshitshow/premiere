@@ -1,0 +1,75 @@
+# Premiere - Default Configuration
+
+# Silence Detection & Removal
+silence:
+  threshold_db: -40        # Audio level considered silence (dB)
+  min_duration: 0.5        # Minimum silence duration to cut (seconds)
+  padding: 0.1             # Padding around cuts (seconds)
+
+# Video Processing
+video:
+  target_resolution: "1080p"  # Output resolution (720p, 1080p, 4k)
+  target_fps: 30              # Output frame rate
+  stabilization: true         # Enable video stabilization
+  stabilization_strength: 0.5 # 0.0 to 1.0
+  color_correction: true      # Enable auto color correction
+
+# Audio Enhancement
+audio:
+  target_lufs: -14            # Target loudness (YouTube standard)
+  noise_reduction: true       # Enable noise reduction
+  noise_reduction_strength: 0.5
+  normalize: true             # Enable loudness normalization
+  compression: true           # Enable dynamic range compression
+  de_ess: true               # Enable de-essing
+  eq_voice: true             # Enable voice EQ enhancement
+
+# Background Music
+music:
+  enabled: false              # Add background music
+  genre: "ambient"            # Music genre/mood
+  volume_db: -20              # Music volume relative to speech
+  auto_duck: true             # Lower music during speech
+  fade_in: 2.0                # Fade in duration (seconds)
+  fade_out: 3.0               # Fade out duration (seconds)
+
+# AI Metadata Generation
+ai:
+  provider: "anthropic"       # AI provider (anthropic, openai)
+  model: "claude-sonnet-4-20250514"
+  transcription_model: "base" # Whisper model (tiny, base, small, medium, large)
+  title_count: 5              # Number of title suggestions
+  tone: "professional"        # Tone (professional, casual, clickbait)
+  include_hashtags: true
+  include_chapters: true
+
+# Thumbnail Generation
+thumbnail:
+  width: 1280
+  height: 720
+  text_overlay: true          # Add title text to thumbnail
+  face_detection: true        # Find frames with faces
+  style: "bold"               # Style (bold, minimal, cinematic)
+
+# YouTube Upload
+youtube:
+  privacy: "private"          # Default privacy (private, unlisted, public)
+  category: "22"              # Category ID (22 = People & Blogs)
+  notify_subscribers: false   # Notify subscribers on publish
+  made_for_kids: false
+  # channel_id: ""            # Set via config command
+  # playlist_id: ""           # Optional default playlist
+
+# Processing
+processing:
+  temp_dir: null              # Temp directory (null = system default)
+  keep_temp: false            # Keep temporary files after processing
+  gpu_acceleration: true      # Use GPU if available
+  threads: 0                  # FFmpeg threads (0 = auto)
+
+# Output
+output:
+  format: "mp4"
+  video_codec: "libx264"
+  audio_codec: "aac"
+  quality_preset: "medium"    # fast, medium, slow, veryslow

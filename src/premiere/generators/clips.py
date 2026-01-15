@@ -2,12 +2,14 @@
 
 import json
 import re
-import tempfile
+import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from premiere.generators.transcription import Transcript, save_transcript
 from premiere.utils.claude_cli import find_viral_clips, generate_clip_metadata
+from premiere.utils.config import get_temp_dir
 from premiere.utils.ffmpeg import probe, run_ffmpeg
 from premiere.utils.logger import get_logger
 
@@ -60,9 +62,13 @@ def detect_viral_moments(
     logger = get_logger()
     logger.info(f"Detecting viral moments (max {max_clips} clips)")
 
-    # Save transcript to temp file for Claude CLI
-    with tempfile.TemporaryDirectory() as temp_dir:
-        transcript_path = Path(temp_dir) / "transcript.md"
+    # Save transcript to workspace temp file for Claude CLI
+    temp_base = get_temp_dir()
+    temp_path = temp_base / f"clips_{int(time.time())}"
+    temp_path.mkdir(parents=True, exist_ok=True)
+    transcript_path = temp_path / "transcript.md"
+    
+    try:
         save_transcript(transcript, transcript_path, format="md")
 
         # Get Claude's analysis
@@ -72,6 +78,10 @@ def detect_viral_moments(
             max_clips,
             (min_duration, max_duration),
         )
+    finally:
+        # Clean up temp directory
+        if temp_path.exists():
+            shutil.rmtree(temp_path, ignore_errors=True)
 
     # Parse response
     clips = _parse_clip_response(response)

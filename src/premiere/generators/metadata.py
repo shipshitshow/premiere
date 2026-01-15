@@ -1,11 +1,12 @@
 """AI-powered metadata generation for YouTube."""
 
-import tempfile
+import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from premiere.generators.transcription import Transcript, generate_chapters, save_transcript
-from premiere.utils.config import get_config
+from premiere.utils.config import get_config, get_temp_dir
 from premiere.utils.logger import get_logger
 
 
@@ -66,9 +67,13 @@ def _generate_with_claude_cli(
     logger = get_logger()
     logger.info("Using Claude CLI for metadata generation")
 
-    # Save transcript to temp file
-    with tempfile.TemporaryDirectory() as temp_dir:
-        transcript_path = Path(temp_dir) / "transcript.md"
+    # Save transcript to workspace temp file
+    temp_base = get_temp_dir()
+    temp_path = temp_base / f"metadata_{int(time.time())}"
+    temp_path.mkdir(parents=True, exist_ok=True)
+    transcript_path = temp_path / "transcript.md"
+    
+    try:
         save_transcript(transcript, transcript_path, format="md")
 
         video_name = video_path.stem if video_path else "video"
@@ -80,6 +85,10 @@ def _generate_with_claude_cli(
             config.tone,
             config.title_count,
         )
+    finally:
+        # Clean up temp directory
+        if temp_path.exists():
+            shutil.rmtree(temp_path, ignore_errors=True)
 
     # Parse response
     return _parse_metadata_response(response, transcript, config)

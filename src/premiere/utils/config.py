@@ -174,3 +174,37 @@ def set_config(config: Config) -> None:
     """Set the global config instance."""
     global _config
     _config = config
+
+
+def get_temp_dir(output_dir: Path | None = None) -> Path:
+    """Get temporary directory for processing.
+    
+    Uses output_dir/temp/ if provided, otherwise workspace/output/temp/.
+    Falls back to system temp if not in project.
+    
+    Args:
+        output_dir: Optional output directory (will use output_dir/temp/).
+    
+    Returns:
+        Path to temporary directory (created if needed).
+    """
+    # Check if we're in the premiere project directory
+    is_project = (
+        (Path.cwd() / "pyproject.toml").exists()
+        or (Path.cwd() / "src" / "premiere").exists()
+    )
+    
+    if output_dir:
+        # Use temp subdirectory within the provided output directory
+        temp_dir = output_dir / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        return temp_dir
+    elif is_project:
+        # Use workspace/output/temp/ as default (reuse existing output folder)
+        temp_dir = Path.cwd() / "output" / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        return temp_dir
+    else:
+        # Fallback to system temp
+        import tempfile
+        return Path(tempfile.gettempdir())

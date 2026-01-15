@@ -1,7 +1,6 @@
 """Claude CLI integration for AI processing."""
 
 import subprocess
-import tempfile
 from pathlib import Path
 
 from premiere.utils.logger import get_logger

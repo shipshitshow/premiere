@@ -1,7 +1,7 @@
 """Video processing pipeline orchestrator."""
 
 import shutil
-import tempfile
+import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -17,7 +17,7 @@ from premiere.processors.music import add_background_music
 from premiere.processors.silence import cut_silence
 from premiere.processors.video import enhance_video
 from premiere.uploaders.youtube import upload_video
-from premiere.utils.config import Config, get_config
+from premiere.utils.config import Config, get_config, get_temp_dir
 from premiere.utils.ffmpeg import probe
 from premiere.utils.logger import get_console, get_logger
 
@@ -122,9 +122,12 @@ class Pipeline:
                 idx = 0
             steps.insert(idx, PipelineStep.GENERATE_CLIPS)
 
-        # Create temp directory for intermediate files
-        with tempfile.TemporaryDirectory(prefix="premiere_") as temp_dir:
-            temp_path = Path(temp_dir)
+        # Create temp directory for intermediate files in output directory
+        temp_base = get_temp_dir(output_dir)
+        temp_path = temp_base / f"premiere_{int(time.time())}"
+        temp_path.mkdir(parents=True, exist_ok=True)
+        
+        try:
             current_video = video_path
 
             with Progress(
@@ -162,6 +165,10 @@ class Pipeline:
                 final_thumb = output_dir / f"{video_path.stem}_thumbnail.jpg"
                 shutil.copy2(result.thumbnail_path, final_thumb)
                 result.thumbnail_path = final_thumb
+        finally:
+            # Clean up temp directory if keep_temp is False
+            if not self.config.processing.keep_temp and temp_path.exists():
+                shutil.rmtree(temp_path, ignore_errors=True)
 
         return result
 

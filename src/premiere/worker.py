@@ -20,10 +20,20 @@ class Worker:
 
         Args:
             queue: Job queue (uses default if not provided).
-            output_dir: Output directory for processed files.
+            output_dir: Output directory for processed files (default: workspace/output).
         """
         self.queue = queue or get_queue()
-        self.output_dir = output_dir or Path.home() / ".premiere" / "output"
+        # Default to workspace/output when in project directory, otherwise ~/.premiere/output
+        if output_dir is None:
+            # Check if we're in the premiere project (has pyproject.toml or src/premiere)
+            workspace_output = Path.cwd() / "output"
+            is_project = (
+                (Path.cwd() / "pyproject.toml").exists()
+                or (Path.cwd() / "src" / "premiere").exists()
+            )
+            self.output_dir = workspace_output if is_project else Path.home() / ".premiere" / "output"
+        else:
+            self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.logger = get_logger()
 

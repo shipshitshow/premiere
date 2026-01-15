@@ -48,6 +48,7 @@ htmlcov/
 *.mp3
 temp/
 output/
+.premiere/
 music/*.mp3
 music/*.wav
 

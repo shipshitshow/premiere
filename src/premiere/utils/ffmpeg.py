@@ -3,10 +3,23 @@
 import json
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from premiere.utils.logger import get_logger
+
+
+__all__ = [
+    "VideoInfo",
+    "FFmpegError",
+    "check_ffmpeg",
+    "check_vidstab_support",
+    "probe",
+    "run_ffmpeg",
+    "extract_audio",
+    "get_resolution_dimensions",
+]
 
 
 @dataclass
@@ -48,6 +61,24 @@ def check_ffmpeg() -> bool:
             "ffprobe not found. Install FFmpeg with: brew install ffmpeg"
         )
     return True
+
+
+def check_vidstab_support() -> bool:
+    """Check if FFmpeg has vidstab filters available.
+
+    Returns:
+        True if vidstab filters are available.
+    """
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-filters"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return "vidstabdetect" in result.stdout and "vidstabtransform" in result.stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
 
 
 def probe(video_path: Path) -> VideoInfo:
@@ -126,7 +157,7 @@ def probe(video_path: Path) -> VideoInfo:
 
 def run_ffmpeg(
     args: list[str],
-    progress_callback: callable | None = None,
+    progress_callback: Callable | None = None,
 ) -> subprocess.CompletedProcess:
     """Run FFmpeg with given arguments.
 
@@ -143,7 +174,10 @@ def run_ffmpeg(
     check_ffmpeg()
     logger = get_logger()
 
-    cmd = ["ffmpeg", "-y", "-hide_banner"] + args
+    # Add flags to reduce verbosity and suppress non-critical warnings
+    # -v warning: Only show warnings and errors (suppress info messages)
+    # -err_detect ignore_err: Ignore non-fatal decoding errors
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-v", "warning", "-err_detect", "ignore_err"] + args
     logger.debug(f"Running: {' '.join(cmd)}")
 
     try:
@@ -153,10 +187,51 @@ def run_ffmpeg(
             text=True,
             check=True,
         )
+        # Filter non-critical warnings from stderr even on success
+        if result.stderr:
+            filtered_lines = []
+            for line in result.stderr.split("\n"):
+                # Skip known non-critical AV1 hardware acceleration warnings
+                if any(skip in line.lower() for skip in [
+                    "doesn't support hardware accelerated",
+                    "error submitting packet to decoder: function not implemented",
+                    "your platform doesn't support",
+                    "hardware accelerated av1 decoding",
+                ]):
+                    logger.debug(f"Suppressed non-critical warning: {line.strip()}")
+                    continue
+                filtered_lines.append(line)
+            
+            # Log any remaining stderr at debug level
+            remaining = "\n".join(filtered_lines).strip()
+            if remaining:
+                logger.debug(f"FFmpeg stderr: {remaining}")
+        
         return result
     except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg failed: {e.stderr}")
-        raise FFmpegError(f"FFmpeg failed: {e.stderr}") from e
+        # Filter out non-critical AV1 hardware acceleration warnings from error
+        stderr = e.stderr
+        filtered_lines = []
+        for line in stderr.split("\n"):
+            # Skip known non-critical warnings
+            if any(skip in line.lower() for skip in [
+                "doesn't support hardware accelerated",
+                "error submitting packet to decoder: function not implemented",
+                "your platform doesn't support",
+                "hardware accelerated av1 decoding",
+            ]):
+                logger.debug(f"Suppressed non-critical warning: {line.strip()}")
+                continue
+            filtered_lines.append(line)
+        
+        filtered_stderr = "\n".join(filtered_lines).strip()
+        if filtered_stderr:
+            logger.error(f"FFmpeg failed: {filtered_stderr}")
+            raise FFmpegError(f"FFmpeg failed: {filtered_stderr}") from e
+        else:
+            # If all errors were filtered (just warnings), still raise with generic message
+            logger.error("FFmpeg failed (filtered non-critical warnings)")
+            raise FFmpegError("FFmpeg failed (check logs for details)") from e
 
 
 def extract_audio(video_path: Path, output_path: Path) -> Path:

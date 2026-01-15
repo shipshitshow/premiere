@@ -216,7 +216,7 @@ def get_queue(storage_dir: Path | None = None) -> JobQueue:
     """Get the job queue instance.
 
     Args:
-        storage_dir: Storage directory (uses default if not provided).
+        storage_dir: Storage directory (default: workspace/.premiere/jobs).
 
     Returns:
         JobQueue instance.
@@ -224,6 +224,12 @@ def get_queue(storage_dir: Path | None = None) -> JobQueue:
     global _queue
     if _queue is None:
         if storage_dir is None:
-            storage_dir = Path.home() / ".premiere" / "jobs"
+            # Check if we're in the premiere project (has pyproject.toml or src/premiere)
+            workspace_jobs = Path.cwd() / ".premiere" / "jobs"
+            is_project = (
+                (Path.cwd() / "pyproject.toml").exists()
+                or (Path.cwd() / "src" / "premiere").exists()
+            )
+            storage_dir = workspace_jobs if is_project else Path.home() / ".premiere" / "jobs"
         _queue = JobQueue(storage_dir)
     return _queue

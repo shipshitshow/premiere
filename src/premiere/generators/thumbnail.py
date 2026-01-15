@@ -31,10 +31,17 @@ def generate_thumbnail(
 
     logger.info(f"Generating thumbnail for {video_path.name}")
 
-    # Extract candidate frames
-    import tempfile
-    with tempfile.TemporaryDirectory() as temp_dir:
-        frames_dir = Path(temp_dir)
+    # Extract candidate frames to workspace temp
+    from premiere.utils.config import get_temp_dir
+    import shutil
+    import time
+    
+    temp_base = get_temp_dir()
+    temp_path = temp_base / f"thumbnail_{int(time.time())}"
+    temp_path.mkdir(parents=True, exist_ok=True)
+    frames_dir = temp_path
+    
+    try:
         frames = extract_keyframes(video_path, frames_dir, count=10)
 
         if not frames:
@@ -59,6 +66,10 @@ def generate_thumbnail(
 
         # Save
         img.save(output_path, "JPEG", quality=95)
+    finally:
+        # Clean up temp directory
+        if temp_path.exists():
+            shutil.rmtree(temp_path, ignore_errors=True)
 
     logger.info(f"Thumbnail generated: {output_path}")
     return output_path

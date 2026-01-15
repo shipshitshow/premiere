@@ -1,12 +1,13 @@
 """Silence detection and removal processor."""
 
 import re
+import shutil
 import subprocess
-import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from premiere.utils.config import SilenceConfig, get_config
+from premiere.utils.config import SilenceConfig, get_config, get_temp_dir
 from premiere.utils.ffmpeg import FFmpegError, check_ffmpeg, run_ffmpeg
 from premiere.utils.logger import get_logger
 
@@ -173,11 +174,13 @@ def cut_silence(
     if not audio_segments:
         raise FFmpegError("No audio segments to keep - video would be empty")
 
-    # Create filter complex for concatenation
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-        segment_files = []
+    # Create filter complex for concatenation using workspace temp
+    temp_base = get_temp_dir()
+    temp_path = temp_base / f"silence_{int(time.time())}"
+    temp_path.mkdir(parents=True, exist_ok=True)
+    segment_files = []
 
+    try:
         # Extract each segment
         for i, segment in enumerate(audio_segments):
             segment_file = temp_path / f"segment_{i:04d}.mp4"
@@ -209,6 +212,10 @@ def cut_silence(
             "-c", "copy",
             str(output_path),
         ])
+    finally:
+        # Clean up temp directory
+        if temp_path.exists():
+            shutil.rmtree(temp_path, ignore_errors=True)
 
     logger.info(f"Silence removed, output: {output_path}")
     return output_path

@@ -33,8 +33,11 @@ def enhance_audio(
     # Noise reduction
     if cfg.noise_reduction:
         # afftdn: FFT-based noise reduction
-        nr_strength = int(cfg.noise_reduction_strength * 30)  # 0-30 range
-        filters.append(f"afftdn=nf=-{nr_strength}")
+        # Map strength (0.0-1.0) to valid range (-80 to -20 dB)
+        # 0.0 = -80 dB (no reduction), 1.0 = -20 dB (max reduction)
+        nf_db = -80 + (cfg.noise_reduction_strength * 60)  # Maps to -80 to -20
+        nf_db = max(-80, min(-20, nf_db))  # Clamp to valid range
+        filters.append(f"afftdn=nf={nf_db:.1f}")
 
     # De-essing
     if cfg.de_ess:

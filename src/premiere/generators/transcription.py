@@ -1,10 +1,11 @@
 """Video transcription using Whisper."""
 
-import tempfile
+import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from premiere.utils.config import get_config
+from premiere.utils.config import get_config, get_temp_dir
 from premiere.utils.ffmpeg import extract_audio
 from premiere.utils.logger import get_logger
 
@@ -53,9 +54,13 @@ def transcribe_video(
             "faster-whisper not installed. Run: pip install faster-whisper"
         ) from e
 
-    # Extract audio to temp file
-    with tempfile.TemporaryDirectory() as temp_dir:
-        audio_path = Path(temp_dir) / "audio.wav"
+    # Extract audio to workspace temp file
+    temp_base = get_temp_dir()
+    temp_path = temp_base / f"transcribe_{int(time.time())}"
+    temp_path.mkdir(parents=True, exist_ok=True)
+    audio_path = temp_path / "audio.wav"
+    
+    try:
         extract_audio(video_path, audio_path)
 
         # Load model and transcribe
@@ -81,6 +86,10 @@ def transcribe_video(
                 text=segment.text.strip(),
             ))
             texts.append(segment.text.strip())
+    finally:
+        # Clean up temp directory
+        if temp_path.exists():
+            shutil.rmtree(temp_path, ignore_errors=True)
 
     full_text = " ".join(texts)
     logger.info(f"Transcription complete: {len(segments)} segments, {len(full_text)} chars")

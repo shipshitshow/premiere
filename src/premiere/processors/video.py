@@ -1,10 +1,11 @@
 """Video cleanup and enhancement processor."""
 
-import tempfile
+import shutil
+import time
 from pathlib import Path
 
-from premiere.utils.config import VideoConfig, get_config
-from premiere.utils.ffmpeg import get_resolution_dimensions, probe, run_ffmpeg
+from premiere.utils.config import VideoConfig, get_config, get_temp_dir
+from premiere.utils.ffmpeg import check_vidstab_support, get_resolution_dimensions, probe, run_ffmpeg
 from premiere.utils.logger import get_logger
 
 
@@ -53,9 +54,15 @@ def enhance_video(
         filters.append("colorlevels=rimax=0.902:gimax=0.902:bimax=0.902")
         filters.append("eq=saturation=1.1:contrast=1.05")
 
-    # Stabilization is a two-pass process
+    # Stabilization is a two-pass process (requires libvidstab)
     if cfg.stabilization:
-        return _stabilize_video(video_path, output_path, filters, cfg)
+        if check_vidstab_support():
+            return _stabilize_video(video_path, output_path, filters, cfg)
+        else:
+            logger.warning(
+                "Video stabilization requested but vidstab filters not available. "
+                "Skipping stabilization. Install FFmpeg with libvidstab support or disable stabilization."
+            )
 
     if not filters:
         logger.info("No video filters enabled, copying original")
@@ -103,8 +110,13 @@ def _stabilize_video(
 
     smoothing = int(config.stabilization_strength * 30) + 10  # 10-40 range
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        transforms_file = Path(temp_dir) / "transforms.trf"
+    # Use workspace temp directory
+    temp_base = get_temp_dir()
+    temp_path = temp_base / f"vidstab_{int(time.time())}"
+    temp_path.mkdir(parents=True, exist_ok=True)
+    transforms_file = temp_path / "transforms.trf"
+    
+    try:
 
         # Pass 1: Analyze motion
         logger.info("Stabilization pass 1: Analyzing motion...")
@@ -131,6 +143,11 @@ def _stabilize_video(
             "-c:a", "copy",
             str(output_path),
         ])
+    finally:
+        # Clean up temp directory
+        if temp_path.exists():
+            import shutil
+            shutil.rmtree(temp_path, ignore_errors=True)
 
     logger.info(f"Video stabilized, output: {output_path}")
     return output_path

@@ -159,7 +159,7 @@ class TestCutSilence:
 
         with patch(
             "premiere.processors.silence.detect_silence", return_value=silence
-        ), patch("premiere.processors.silence.probe", return_value=mock_video_info), patch(
+        ), patch("premiere.utils.ffmpeg.probe", return_value=mock_video_info), patch(
             "premiere.processors.silence.run_ffmpeg"
         ) as mock_run, patch(
             "premiere.processors.silence.get_temp_dir", return_value=temp_dir
@@ -181,7 +181,7 @@ class TestCutSilence:
 
         with patch(
             "premiere.processors.silence.detect_silence", return_value=silence
-        ), patch("premiere.processors.silence.probe", return_value=mock_video_info), patch(
+        ), patch("premiere.utils.ffmpeg.probe", return_value=mock_video_info), patch(
             "premiere.processors.silence.get_audio_segments", return_value=[]
         ):
             with pytest.raises(FFmpegError, match="No audio segments"):

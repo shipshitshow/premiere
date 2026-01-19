@@ -284,12 +284,18 @@ class TestGetTempDir:
         assert result.exists()
         assert result.parent == output_dir
 
-    def test_get_temp_dir_fallback_to_system(self):
+    def test_get_temp_dir_fallback_to_system(self, temp_dir):
         """Test fallback to system temp when not in project."""
-        with patch("premiere.utils.config.Path") as mock_path:
-            mock_cwd = mock_path.cwd.return_value
-            mock_cwd.__truediv__.return_value.exists.return_value = False
+        import os
+        import tempfile as tf
 
-            with patch("tempfile.gettempdir", return_value="/tmp"):
-                result = get_temp_dir()
-                assert str(result) == "/tmp" or "temp" in str(result).lower()
+        # Change to a temporary directory that doesn't have pyproject.toml
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(temp_dir)
+            # No pyproject.toml or src/premiere in temp_dir
+            result = get_temp_dir()
+            # Should use system temp
+            assert str(tf.gettempdir()) in str(result) or "temp" in str(result).lower()
+        finally:
+            os.chdir(original_cwd)

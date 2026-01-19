@@ -22,6 +22,14 @@ app = typer.Typer(
 
 console = Console()
 
+# Global dry-run flag
+_dry_run: bool = False
+
+
+def is_dry_run() -> bool:
+    """Check if dry-run mode is enabled."""
+    return _dry_run
+
 
 def version_callback(value: bool):
     if value:
@@ -43,13 +51,23 @@ def main(
         Optional[Path],
         typer.Option("--config", "-c", help="Path to config file"),
     ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", "-n", help="Show what would be done without executing"),
+    ] = False,
 ):
     """Premiere - Automated video processing pipeline."""
+    global _dry_run
+    _dry_run = dry_run
+
     level = "DEBUG" if verbose else "INFO"
     setup_logger(level=level)
 
     if config:
         set_config(load_config(config))
+
+    if dry_run:
+        console.print("[yellow]DRY RUN MODE[/yellow] - No changes will be made")
 
 
 @app.command()
@@ -97,6 +115,19 @@ def process(
         steps.remove(PipelineStep.ENHANCE_VIDEO)
     if skip_audio:
         steps.remove(PipelineStep.ENHANCE_AUDIO)
+
+    # Handle dry-run mode
+    if is_dry_run():
+        console.print(Panel(f"[bold]Would process:[/bold] {video.name}"))
+        console.print("\n[bold]Steps to execute:[/bold]")
+        for step in steps:
+            console.print(f"  • {step.name.replace('_', ' ').title()}")
+        if clips:
+            console.print(f"  • Generate Clips (max: {max_clips})")
+        if upload:
+            console.print("  • Upload to YouTube")
+        console.print(f"\n[bold]Output:[/bold] {output or video.parent / f'{video.stem}_processed.mp4'}")
+        return
 
     console.print(Panel(f"[bold]Processing:[/bold] {video.name}"))
 

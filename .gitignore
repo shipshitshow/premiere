@@ -24,6 +24,7 @@ wheels/
 .venv/
 venv/
 ENV/
+app/.venv/
 
 # IDE
 .idea/
@@ -31,6 +32,9 @@ ENV/
 *.swp
 *.swo
 *~
+
+# Claude Code (keep settings.json, ignore local overrides)
+.claude/settings.local.json
 
 # Testing
 .coverage
@@ -57,6 +61,7 @@ music/*.wav
 .env.local
 *.json
 !config/*.json
+!.claude/settings.json
 credentials.json
 client_secrets.json
 token.pickle

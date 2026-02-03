@@ -1,211 +1,185 @@
-# Premiere
+# Premiere Hybrid Editing System
 
-Automated video processing pipeline with YouTube upload, viral clip generation, and review UI. Transform raw footage into polished, upload-ready content.
+A unified system for video editing combining:
+- **Python App** - Automated "run once and done" processing
+- **Adobe MCP** - Claude-controlled manual editing in Premiere Pro
+- **ExtendScripts** - Adobe automation inside Premiere
 
-## Complete Workflow
+## Project Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         PREMIERE WORKFLOW                           │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  1. INGEST           2. PROCESS          3. REVIEW       4. UPLOAD  │
-│  ┌──────────┐       ┌────────────┐      ┌──────────┐    ┌────────┐ │
-│  │ YouTube  │──────▶│ Cut        │─────▶│ Streamlit│───▶│YouTube │ │
-│  │ Download │       │ Silence    │      │ UI       │    │Upload  │ │
-│  │ (yt-dlp) │       │ Enhance    │      │ Preview  │    │Private │ │
-│  └──────────┘       │ Transcribe │      │ Edit     │    └────────┘ │
-│       or            │ Clips      │      │ Approve  │               │
-│  ┌──────────┐       │ Metadata   │      └──────────┘               │
-│  │ Local    │       └────────────┘                                 │
-│  │ File     │                                                      │
-│  └──────────┘                                                      │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+premiere/
+├── app/                          # Python video processor
+│   ├── src/premiere/
+│   │   ├── processors/           # Silence, audio, video processors
+│   │   ├── generators/           # Clips, metadata, thumbnails
+│   │   ├── uploaders/            # YouTube upload
+│   │   └── utils/                # FFmpeg, Claude CLI wrappers
+│   ├── tests/
+│   ├── pyproject.toml
+│   └── README.md
+│
+├── mcp/                          # MCP servers for Claude Code
+│   ├── premiere-mcp/             # Control Python app via MCP
+│   │   ├── server.py
+│   │   └── tools/
+│   └── adobe-mcp/                # Control Adobe Premiere Pro
+│
+└── scripts/                      # ExtendScript for Adobe automation
+    ├── import-media.jsx
+    ├── create-sequence.jsx
+    ├── apply-cuts.jsx
+    ├── add-markers.jsx
+    ├── export-sequence.jsx
+    └── batch-operations.jsx
 ```
 
-## Features
+## Two Workflows
 
-- **YouTube Download**: Download videos with yt-dlp
-- **Silence Removal**: Cut dead air automatically
-- **Video Enhancement**: Stabilization, color correction
-- **Audio Enhancement**: Noise reduction, -14 LUFS normalization
-- **Transcription**: Whisper-powered with timestamps
-- **Viral Clips**: AI detects best moments for Shorts (9:16)
-- **AI Metadata**: Claude CLI generates titles, descriptions, tags
-- **Thumbnail Generation**: Smart frame selection with text
-- **Review UI**: Streamlit interface for preview and approval
-- **YouTube Upload**: Private upload with full metadata
+### Workflow A: Automated Processing (Python App)
 
-## Installation
+Use when you want to process a video and be done with it.
 
 ```bash
-# Python 3.11+ required
+# Process video through full pipeline
+cd app && premiere process ~/Videos/livestream.mp4
+
+# Or with specific options
+premiere process video.mp4 --clips --max-clips 5 --upload
+```
+
+Via Claude Code with MCP:
+```
+"Process my livestream and find viral clips"
+→ premiere_process + premiere_detect_clips
+```
+
+### Workflow B: Creative Editing (Adobe MCP)
+
+Use when you need manual control, preview, or creative decisions.
+
+```
+"Open this in Premiere and show me the timeline"
+→ adobe_create_project + adobe_import_media
+
+"Cut at 5:32 and add a transition"
+→ Claude sends commands to Premiere
+→ You see changes live
+```
+
+## Setup
+
+### 1. Python App
+
+```bash
+cd app
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+
+# Verify installation
+premiere --version
+premiere info ~/Videos/test.mp4
+```
+
+### 2. premiere-mcp (MCP Server)
+
+```bash
+cd mcp/premiere-mcp
 pip install -e .
-
-# System dependencies
-brew install ffmpeg yt-dlp
-
-# Claude CLI for AI features
-npm install -g @anthropic-ai/claude-code
 ```
 
-## Quick Start
+Add to Claude Code settings (`~/.claude/settings.json`):
 
-### Option 1: Full UI Workflow
+```json
+{
+  "mcpServers": {
+    "premiere": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "server"],
+      "cwd": "~/www/VincentShipsIt/premiere/mcp/premiere-mcp"
+    }
+  }
+}
+```
+
+### 3. adobe-mcp (Optional)
+
+See [mcp/adobe-mcp/README.md](mcp/adobe-mcp/README.md) for setup instructions.
+
+## MCP Tools
+
+### premiere (Python App)
+
+| Tool | Purpose |
+|------|---------|
+| `premiere_info` | Get video file information |
+| `premiere_download` | Download from YouTube |
+| `premiere_detect_segments` | Analyze silence/speech |
+| `premiere_detect_clips` | Find viral moments with AI |
+| `premiere_process` | Run automated pipeline |
+| `premiere_cut_silence` | Remove silence from video |
+| `premiere_enhance_audio` | Improve audio quality |
+| `premiere_transcribe` | Transcribe audio to text |
+| `premiere_export` | Export processed video |
+| `premiere_export_clips` | Export multiple clips |
+
+### adobe-premiere (Premiere Pro)
+
+| Tool | Purpose |
+|------|---------|
+| `adobe_create_project` | Create new Premiere project |
+| `adobe_import_media` | Import files into project |
+| `adobe_create_sequence` | Create timeline |
+| `adobe_insert_clip` | Add clip to timeline |
+| `adobe_apply_effect` | Apply video/audio effect |
+| `adobe_add_marker` | Add marker at timestamp |
+| `adobe_export` | Export sequence |
+
+## ExtendScripts
+
+Scripts in `scripts/` can be called by adobe-mcp or run directly in Premiere:
+
+- **import-media.jsx** - Import files into project bins
+- **create-sequence.jsx** - Create sequences from presets
+- **apply-cuts.jsx** - Remove silence segments from timeline
+- **add-markers.jsx** - Add markers for clips, chapters
+- **export-sequence.jsx** - Queue exports to Media Encoder
+- **batch-operations.jsx** - Combined workflows
+
+## Example Workflows
+
+### Quick Automated Edit
 
 ```bash
-# 1. Start the review UI
-premiere ui
+# Download and process in one go
+premiere download "https://youtube.com/..." --process
 
-# 2. Add videos via sidebar (YouTube URL or upload)
-# 3. Click "Process Pending" to process
-# 4. Review output, edit metadata, select clips
-# 5. Click "Approve" then "Upload Approved"
+# Process local file with clips
+premiere process video.mp4 --clips --max-clips 5
 ```
 
-### Option 2: CLI Workflow
-
-```bash
-# Download and process
-premiere download "https://youtube.com/watch?v=..." --process
-
-# Or add to job queue
-premiere add-job "https://youtube.com/watch?v=..."
-premiere add-job ./local-video.mp4
-
-# Process jobs
-premiere worker --once
-
-# List jobs
-premiere jobs
-
-# Launch UI for review
-premiere ui
-```
-
-### Option 3: Direct Processing
-
-```bash
-# Full pipeline with clips
-premiere process video.mp4 --clips --upload
-
-# Individual steps
-premiere transcribe video.mp4 --format md
-premiere generate-clips video.mp4 --max 5
-premiere generate-metadata video.mp4
-```
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `ui` | Launch Streamlit review interface |
-| `download` | Download video from YouTube |
-| `add-job` | Add video to processing queue |
-| `jobs` | List all jobs and their status |
-| `worker` | Run background processor |
-| `process` | Full pipeline (silence, enhance, metadata) |
-| `transcribe` | Extract transcript (md, txt, json, srt) |
-| `generate-clips` | Find viral moments and extract shorts |
-| `generate-metadata` | AI titles/description via Claude CLI |
-| `cut-silence` | Remove silent segments |
-| `enhance-audio` | Noise reduction, normalization |
-| `enhance-video` | Stabilization, color correction |
-| `thumbnail` | Generate thumbnail with text overlay |
-| `upload` | Upload to YouTube |
-| `setup` | Configure YouTube API credentials |
-
-## Review UI
-
-The Streamlit UI provides:
-
-- **Dashboard**: Overview of all jobs and their status
-- **Video Preview**: Watch processed video before approval
-- **Metadata Editor**: Edit titles, description, tags
-- **Clips Gallery**: Preview and select viral clips
-- **Transcript Viewer**: Read and download transcript
-- **One-click Approval**: Approve and queue for upload
-
-```bash
-premiere ui --port 8501
-```
-
-## Job Status Flow
+### Via Claude Code
 
 ```
-PENDING → DOWNLOADING → PROCESSING → REVIEW → APPROVED → UPLOADING → COMPLETED
-                                        ↓                      ↓
-                                      FAILED ←─────────────────┘
+"Download my livestream from [URL] and remove silence"
+"What clips did it find? Export 1, 3, and 5"
+"Open the processed video in Premiere for fine-tuning"
 ```
 
-## Viral Clips
-
-Clips are extracted as vertical 9:16 videos ready for Shorts/TikTok:
-
-```bash
-premiere generate-clips video.mp4 --max 5 --min-duration 15 --max-duration 60
-```
-
-Each clip includes:
-- Vertical 1080x1920 MP4
-- AI-generated title and caption
-- Hashtags for discovery
-- Transcript text
-
-## Configuration
-
-Edit `config/default.yaml`:
-
-```yaml
-silence:
-  threshold_db: -40
-  min_duration: 0.5
-
-audio:
-  target_lufs: -14
-  noise_reduction: true
-
-ai:
-  transcription_model: "base"
-  title_count: 5
-  tone: "professional"
-
-youtube:
-  privacy: "private"
-  category: "22"
-```
-
-## Output Structure
+### Fine-Tuning in Premiere
 
 ```
-~/.premiere/
-├── jobs/
-│   └── jobs.json           # Job queue
-└── output/
-    └── {job_id}/
-        ├── source.mp4      # Downloaded video
-        ├── source_processed.mp4
-        ├── source_transcript.md
-        ├── source_thumbnail.jpg
-        └── source_clips/
-            ├── clip_01_120s.mp4
-            ├── clip_02_340s.mp4
-            └── manifest.json
+"Add a crossfade at 10:32"
+"Mark chapters at 0:00, 5:23, 12:45"
+"Export just the intro section (0:00-2:30)"
 ```
 
-## Requirements
+## Dependencies
 
 - Python 3.11+
-- FFmpeg with libx264
-- yt-dlp (for YouTube download)
-- Claude CLI (for AI features)
-- Google OAuth credentials (for upload)
-
-## YouTube API Setup
-
-1. [Google Cloud Console](https://console.cloud.google.com/)
-2. Create project → Enable YouTube Data API v3
-3. Create OAuth 2.0 credentials (Desktop app)
-4. Download JSON → `~/.premiere/client_secrets.json`
-5. Run `premiere setup`
+- FFmpeg
+- OpenAI Whisper (for transcription)
+- yt-dlp (for downloads)
+- Adobe Premiere Pro (for adobe-mcp workflow)

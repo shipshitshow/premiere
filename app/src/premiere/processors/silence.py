@@ -94,6 +94,58 @@ def detect_silence(
     return segments
 
 
+def get_segments(
+    video_path: Path,
+    threshold_db: float | None = None,
+    min_duration: float | None = None,
+    padding: float | None = None,
+) -> dict:
+    """Get silence and audio segments for MCP tools.
+
+    Args:
+        video_path: Path to video file.
+        threshold_db: Silence threshold in dB (default from config).
+        min_duration: Minimum silence duration in seconds (default from config).
+        padding: Padding around cuts in seconds (default from config).
+
+    Returns:
+        Dict with silence_segments, audio_segments, video_duration, and stats.
+    """
+    from premiere.utils.ffmpeg import probe
+
+    # Detect silence
+    silence_segments = detect_silence(video_path, threshold_db, min_duration)
+
+    # Get video info
+    info = probe(video_path)
+
+    # Get audio segments to keep
+    audio_segments = get_audio_segments(silence_segments, info.duration, padding)
+
+    # Calculate stats
+    total_silence = sum(s.duration for s in silence_segments)
+    total_audio = sum(a.end - a.start for a in audio_segments)
+
+    return {
+        "silence_segments": [
+            {"start": s.start, "end": s.end, "duration": s.duration}
+            for s in silence_segments
+        ],
+        "audio_segments": [
+            {"start": a.start, "end": a.end}
+            for a in audio_segments
+        ],
+        "video_duration": info.duration,
+        "stats": {
+            "silence_count": len(silence_segments),
+            "audio_count": len(audio_segments),
+            "total_silence_seconds": round(total_silence, 2),
+            "total_audio_seconds": round(total_audio, 2),
+            "silence_percentage": round((total_silence / info.duration) * 100, 1) if info.duration > 0 else 0,
+        }
+    }
+
+
 def get_audio_segments(
     silence_segments: list[SilenceSegment],
     video_duration: float,

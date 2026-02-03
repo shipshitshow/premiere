@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "premiere": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "server"],
+      "cwd": "./mcp/premiere-mcp"
+    }
+  }
+}

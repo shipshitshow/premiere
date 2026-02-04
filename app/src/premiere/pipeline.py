@@ -10,7 +10,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from premiere.generators.clips import GeneratedClip, detect_viral_moments, extract_clips, save_clips_manifest
 from premiere.generators.metadata import VideoMetadata, generate_metadata
-from premiere.generators.thumbnail import generate_thumbnail
 from premiere.generators.transcription import Transcript, save_transcript, transcribe_video
 from premiere.processors.audio import enhance_audio
 from premiere.processors.music import add_background_music
@@ -32,7 +31,6 @@ class PipelineStep(Enum):
     TRANSCRIBE = auto()
     GENERATE_CLIPS = auto()
     GENERATE_METADATA = auto()
-    GENERATE_THUMBNAIL = auto()
     UPLOAD = auto()
 
 
@@ -44,7 +42,6 @@ class PipelineResult:
     transcript: Transcript | None = None
     transcript_path: Path | None = None
     metadata: VideoMetadata | None = None
-    thumbnail_path: Path | None = None
     clips: list[GeneratedClip] = field(default_factory=list)
     clips_dir: Path | None = None
     upload_result: dict | None = None
@@ -159,12 +156,6 @@ class Pipeline:
                 shutil.copy2(current_video, output_path)
                 result.output_path = output_path
                 self.logger.info(f"Output saved to {output_path}")
-
-            # Copy thumbnail if generated
-            if result.thumbnail_path and result.thumbnail_path.exists():
-                final_thumb = output_dir / f"{video_path.stem}_thumbnail.jpg"
-                shutil.copy2(result.thumbnail_path, final_thumb)
-                result.thumbnail_path = final_thumb
         finally:
             # Clean up temp directory if keep_temp is False
             if not self.config.processing.keep_temp and temp_path.exists():
@@ -252,22 +243,13 @@ class Pipeline:
             result.metadata = generate_metadata(result.transcript, video_path)
             return video_path, result
 
-        elif step == PipelineStep.GENERATE_THUMBNAIL:
-            title = None
-            if result.metadata and result.metadata.titles:
-                title = result.metadata.titles[0]
-            thumb_path = temp_dir / "thumbnail.jpg"
-            generate_thumbnail(video_path, thumb_path, title, self.config.thumbnail)
-            result.thumbnail_path = thumb_path
-            return video_path, result
-
         elif step == PipelineStep.UPLOAD:
             if result.metadata is None:
                 raise ValueError("Metadata required for upload")
             result.upload_result = upload_video(
                 video_path,
                 result.metadata,
-                result.thumbnail_path,
+                None,
                 self.config.youtube,
             )
             return video_path, result

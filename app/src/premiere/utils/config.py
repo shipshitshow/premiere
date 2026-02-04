@@ -82,16 +82,6 @@ class AIConfig(BaseModel):
     include_chapters: bool = True
 
 
-class ThumbnailConfig(BaseModel):
-    """Thumbnail generation configuration."""
-
-    width: int = Field(default=1280, ge=100, le=4096)
-    height: int = Field(default=720, ge=100, le=4096)
-    text_overlay: bool = True
-    face_detection: bool = True
-    style: Literal["bold", "minimal", "cinematic"] = "bold"
-
-
 class YouTubeConfig(BaseModel):
     """YouTube upload configuration."""
 
@@ -134,7 +124,6 @@ class Config(BaseSettings):
     audio: AudioConfig = Field(default_factory=AudioConfig)
     music: MusicConfig = Field(default_factory=MusicConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
-    thumbnail: ThumbnailConfig = Field(default_factory=ThumbnailConfig)
     youtube: YouTubeConfig = Field(default_factory=YouTubeConfig)
     processing: ProcessingConfig = Field(default_factory=ProcessingConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
@@ -258,14 +247,6 @@ def validate_config(config: Config | None = None) -> list[str]:
     if shutil.which("ffprobe") is None:
         raise ConfigValidationError(
             "ffprobe not found. Please install FFmpeg to use Premiere."
-        )
-
-    # Validate thumbnail dimensions maintain reasonable aspect ratio
-    aspect_ratio = cfg.thumbnail.width / cfg.thumbnail.height
-    if aspect_ratio < 0.5 or aspect_ratio > 3:
-        warnings.append(
-            f"Unusual thumbnail aspect ratio ({aspect_ratio:.2f}). "
-            "YouTube recommends 16:9 (1.78) for thumbnails."
         )
 
     # Check for API keys if using AI features

@@ -440,32 +440,6 @@ def generate_metadata_cmd(
         console.print(f"\n[bold]Hashtags:[/bold] {' '.join(metadata.hashtags)}")
 
 
-@app.command("thumbnail")
-def thumbnail_cmd(
-    video: Annotated[Path, typer.Argument(help="Input video file")],
-    output: Annotated[
-        Optional[Path],
-        typer.Option("--output", "-o", help="Output thumbnail path"),
-    ] = None,
-    title: Annotated[
-        Optional[str],
-        typer.Option("--title", "-t", help="Title text overlay"),
-    ] = None,
-):
-    """Generate thumbnail from video."""
-    from premiere.generators.thumbnail import generate_thumbnail
-
-    if not video.exists():
-        console.print(f"[red]Error:[/red] Video not found: {video}")
-        raise typer.Exit(1)
-
-    output = output or video.parent / f"{video.stem}_thumbnail.jpg"
-
-    console.print(f"Generating thumbnail for {video.name}...")
-    generate_thumbnail(video, output, title)
-    console.print(f"[green]✓[/green] Output: {output}")
-
-
 @app.command()
 def upload(
     video: Annotated[Path, typer.Argument(help="Input video file")],

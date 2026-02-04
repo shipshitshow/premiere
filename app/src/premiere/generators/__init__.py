@@ -8,7 +8,6 @@ from premiere.generators.clips import (
     save_clips_manifest,
 )
 from premiere.generators.metadata import VideoMetadata, generate_metadata
-from premiere.generators.thumbnail import generate_thumbnail
 from premiere.generators.transcription import (
     Transcript,
     generate_srt,
@@ -25,7 +24,6 @@ __all__ = [
     "extract_clips",
     "generate_metadata",
     "generate_srt",
-    "generate_thumbnail",
     "save_clips_manifest",
     "save_transcript",
     "transcribe_video",

@@ -1,0 +1,1624 @@
+# MIT License
+#
+# Copyright (c) 2025 Mike Chambers
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+from mcp.server.fastmcp import FastMCP
+from ..shared import init, sendCommand, createCommand, socket_client
+import sys
+import os
+import subprocess
+import time
+
+
+def send_keystroke_to_premiere(key: str, modifiers: list = None):
+    """Send a keystroke to Premiere Pro using AppleScript."""
+    if modifiers is None:
+        modifiers = []
+
+    # Build modifier string for AppleScript
+    if modifiers:
+        modifier_str = " using {" + ", ".join(f"{m} down" for m in modifiers) + "}"
+    else:
+        modifier_str = ""
+
+    script = f'''
+    tell application "Adobe Premiere Pro 2026" to activate
+    delay 0.1
+    tell application "System Events"
+        keystroke "{key}"{modifier_str}
+    end tell
+    '''
+
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+        raise Exception(f"AppleScript error: {result.stderr}")
+
+    return True
+
+
+def send_key_code_to_premiere(key_code: int, modifiers: list = None):
+    """Send a key code to Premiere Pro using AppleScript (for special keys)."""
+    if modifiers is None:
+        modifiers = []
+
+    if modifiers:
+        modifier_str = " using {" + ", ".join(f"{m} down" for m in modifiers) + "}"
+    else:
+        modifier_str = ""
+
+    script = f'''
+    tell application "Adobe Premiere Pro 2026" to activate
+    delay 0.1
+    tell application "System Events"
+        key code {key_code}{modifier_str}
+    end tell
+    '''
+
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+        raise Exception(f"AppleScript error: {result.stderr}")
+
+    return True
+
+
+#logger.log(f"Python path: {sys.executable}")
+#logger.log(f"PYTHONPATH: {os.environ.get('PYTHONPATH')}")
+#logger.log(f"Current working directory: {os.getcwd()}")
+#logger.log(f"Sys.path: {sys.path}")
+
+
+mcp_name = "Adobe Premiere MCP Server"
+mcp = FastMCP(mcp_name, log_level="ERROR")
+print(f"{mcp_name} running on stdio", file=sys.stderr)
+
+APPLICATION = "premiere"
+PROXY_URL = os.environ.get('PROXY_URL', 'http://localhost:3001')
+PROXY_TIMEOUT = int(os.environ.get('PROXY_TIMEOUT', '20'))
+
+socket_client.configure(
+    app=APPLICATION,
+    url=PROXY_URL,
+    timeout=PROXY_TIMEOUT
+)
+
+init(APPLICATION, socket_client)
+
+# Register high-level tools for Python pipeline integration
+try:
+    from ...premiere_tools import register_tools
+    register_tools(mcp)
+    print("Registered Python pipeline integration tools", file=sys.stderr)
+except ImportError as e:
+    print(f"Note: Python pipeline tools not available: {e}", file=sys.stderr)
+
+@mcp.tool()
+def get_project_info():
+    """
+    Returns basic info on the currently active project in Premiere Pro.
+
+    Returns lightweight info: whether a project is open, sequence count,
+    and active sequence name/id. Use get_full_project_data for detailed
+    sequence and clip information.
+    """
+
+    command = createCommand("getProjectInfo", {
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def get_full_project_data():
+    """
+    Returns full detailed data about all sequences and project items.
+
+    WARNING: This can return a LARGE response for big projects.
+    Use sparingly. For basic info, use get_project_info instead.
+
+    Returns:
+        - sequences: All sequences with their tracks and clips
+        - projectItems: All items in the project bin
+    """
+
+    command = createCommand("getFullProjectData", {
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
+def save_project():
+    """
+    Saves the active project in Premiere Pro.
+    """
+
+    command = createCommand("saveProject", {
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
+def save_project_as(file_path: str):
+    """Saves the current Premiere project to the specified location.
+    
+    Args:
+        file_path (str): The absolute path (including filename) where the file will be saved.
+            Example: "/Users/username/Documents/project.prproj"
+
+    """
+    
+    command = createCommand("saveProjectAs", {
+        "filePath":file_path
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
+def open_project(file_path: str):
+    """Opens the Premiere project at the specified path.
+    
+    Args:
+        file_path (str): The absolute path (including filename) of the Premiere Pro project to open.
+            Example: "/Users/username/Documents/project.prproj"
+
+    """
+    
+    command = createCommand("openProject", {
+        "filePath":file_path
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def create_project(directory_path: str, project_name: str):
+    """
+    Create a new Premiere project.
+
+    Creates a new Adobe Premiere project file, saves it to the specified location and then opens it in Premiere.
+
+    The function initializes an empty project with default settings.
+
+    Args:
+        directory_path (str): The full path to the directory where the project file will be saved. This directory must exist before calling the function.
+        project_name (str): The name to be given to the project file. The '.prproj' extension will be added.
+    """
+
+    command = createCommand("createProject", {
+        "path":directory_path,
+        "name":project_name
+    })
+
+    return sendCommand(command)
+
+
+
+@mcp.tool()
+def set_audio_track_mute(sequence_id:str, audio_track_index: int, mute: bool):
+    """
+    Sets the mute property on the specified audio track. If mute is true, all clips on the track will be muted and not played.
+
+    Args:
+        sequence_id (str) : The id of the sequence on which to set the audio track mute.
+        audio_track_index (int): The index of the audio track to mute or unmute. Indices start at 0 for the first audio track.
+        mute (bool): Whether the track should be muted.
+            - True: Mutes the track (audio will not be played)
+            - False: Unmutes the track (audio will be played normally)
+
+    """
+
+    command = createCommand("setAudioTrackMute", {
+        "sequenceId": sequence_id,
+        "audioTrackIndex":audio_track_index,
+        "mute":mute
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def set_active_sequence(sequence_id: str):
+    """
+    Sets the sequence with the specified id as the active sequence within Premiere Pro (currently selected and visible in timeline)
+    
+    Args:
+        sequence_id (str): ID for the sequence to be set as active
+    """
+
+    command = createCommand("setActiveSequence", {
+        "sequenceId":sequence_id
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def create_sequence_from_media(item_names: list[str], sequence_name: str = "default"):
+    """
+    Creates a new sequence from the specified project items, placing clips on the timeline in the order they are provided.
+    
+    If there is not an active sequence the newly created sequence will be set as the active sequence when created.
+    
+    Args:
+        item_names (list[str]): A list of project item names to include in the sequence in the desired order.
+        sequence_name (str, optional): The name to give the new sequence. Defaults to "default".
+    """
+
+
+    command = createCommand("createSequenceFromMedia", {
+        "itemNames":item_names,
+        "sequenceName":sequence_name
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
+def add_media_to_sequence(sequence_id:str, item_name: str, video_track_index: int, audio_track_index: int, insertion_time_ticks: int = 0, overwrite: bool = True):
+    """
+    Adds a specified media item to the active sequence's timeline.
+
+    Args:
+        sequence_id (str) : The id for the sequence to add the media to
+        item_name (str): The name or identifier of the media item to add.
+        video_track_index (int, optional): The index of the video track where the item should be inserted. Defaults to 0.0.
+        audio_track_index (int, optional): The index of the audio track where the item should be inserted. Defaults to 0.0.
+        insertion_time_ticks (int, optional): The position on the timeline in ticks, with 0 being the beginning. The API will return positions of existing clips in ticks
+        overwrite (bool, optional): Whether to overwrite existing content at the insertion point. Defaults to True. If False, any existing clips that overlap will be split and item inserted.
+    """
+
+
+    command = createCommand("addMediaToSequence", {
+        "sequenceId": sequence_id,
+        "itemName":item_name,
+        "videoTrackIndex":video_track_index,
+        "audioTrackIndex":audio_track_index,
+        "insertionTimeTicks":insertion_time_ticks,
+        "overwrite":overwrite
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def set_audio_clip_disabled(sequence_id:str, audio_track_index: int, track_item_index: int, disabled: bool):
+    """
+    Enables or disables a audio clip in the timeline.
+    
+    Args:
+        sequence_id (str) : The id for the sequence to set the audio clip disabled property.
+        audio_track_index (int): The index of the audio track containing the target clip.
+        track_item_index (int): The index of the clip within the track to enable/disable.
+        disabled (bool): Whether to disable the clip.
+            - True: Disables the clip (clip will not be visible during playback or export)
+            - False: Enables the clip (normal visibility)
+    """
+
+    command = createCommand("setAudioClipDisabled", {
+        "sequenceId": sequence_id,
+        "audioTrackIndex":audio_track_index,
+        "trackItemIndex":track_item_index,
+        "disabled":disabled
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
+def set_video_clip_disabled(sequence_id:str, video_track_index: int, track_item_index: int, disabled: bool):
+    """
+    Enables or disables a video clip in the timeline.
+    
+    Args:
+        sequence_id (str) : The id for the sequence to set the video clip disabled property.
+        video_track_index (int): The index of the video track containing the target clip.
+        track_item_index (int): The index of the clip within the track to enable/disable.
+        disabled (bool): Whether to disable the clip.
+            - True: Disables the clip (clip will not be visible during playback or export)
+            - False: Enables the clip (normal visibility)
+    """
+
+    command = createCommand("setVideoClipDisabled", {
+        "sequenceId": sequence_id,
+        "videoTrackIndex":video_track_index,
+        "trackItemIndex":track_item_index,
+        "disabled":disabled
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def add_black_and_white_effect(sequence_id:str, video_track_index: int, track_item_index: int):
+    """
+    Adds a black and white effect to a clip at the specified track and position.
+    
+    Args:
+        sequence_id (str) : The id for the sequence to add the effect to
+        video_track_index (int): The index of the video track containing the target clip.
+            Track indices start at 0 for the first video track and increment upward.
+        track_item_index (int): The index of the clip within the track to apply the effect to.
+            Clip indices start at 0 for the first clip in the track and increment from left to right.
+    """
+
+    command = createCommand("appendVideoFilter", {
+        "sequenceId": sequence_id,
+        "videoTrackIndex":video_track_index,
+        "trackItemIndex":track_item_index,
+        "effectName":"AE.ADBE Black & White",
+        "properties":[
+        ]
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
+def export_frame(sequence_id:str, file_path: str, seconds: int):
+    """Captures a specific frame from the sequence at the given timestamp
+    and exports it as a PNG image file to the specified path.
+    
+    Args:
+        sequence_id (str) : The id for the sequence to export the frame from
+        file_path (str): The destination path where the exported PNG image will be saved.
+            Must include the full directory path and filename with .png extension.
+        seconds (int): The timestamp in seconds from the beginning of the sequence
+            where the frame should be captured. The frame closest to this time position
+            will be extracted.
+    """
+    if not file_path.lower().endswith(".png"):
+        file_path += ".png"
+    
+    command = createCommand("exportFrame", {
+        "sequenceId": sequence_id,
+        "filePath": file_path,
+        "seconds":seconds
+        }
+    )
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def add_gaussian_blur_effect(sequence_id: str, video_track_index: int, track_item_index: int, blurriness: float, blur_dimensions: str = "HORIZONTAL_VERTICAL"):
+    """
+    Adds a gaussian blur effect to a clip at the specified track and position.
+
+    Args:
+        sequence_id (str) : The id for the sequence to add the effect to
+        video_track_index (int): The index of the video track containing the target clip.
+            Track indices start at 0 for the first video track and increment upward.
+            
+        track_item_index (int): The index of the clip within the track to apply the effect to.
+            Clip indices start at 0 for the first clip in the track and increment from left to right.
+            
+        blurriness (float): The intensity of the blur effect. Higher values create stronger blur.
+            Recommended range is between 0.0 and 100.0 (Max 3000).
+            
+        blur_dimensions (str, optional): The direction of the blur effect. Defaults to "HORIZONTAL_VERTICAL".
+            Valid options are:
+            - "HORIZONTAL_VERTICAL": Blur in all directions
+            - "HORIZONTAL": Blur only horizontally
+            - "VERTICAL": Blur only vertically
+    """
+    dimensions = {"HORIZONTAL_VERTICAL": 0, "HORIZONTAL": 1, "VERTICAL": 2}
+    
+    # Validate blur_dimensions parameter
+    if blur_dimensions not in dimensions:
+        raise ValueError(f"Invalid blur_dimensions. ")
+
+    command = createCommand("appendVideoFilter", {
+        "sequenceId": sequence_id,
+        "videoTrackIndex": video_track_index,
+        "trackItemIndex": track_item_index,
+        "effectName": "AE.ADBE Gaussian Blur 2",
+        "properties": [
+            {"name": "Blur Dimensions", "value": dimensions[blur_dimensions]},
+            {"name": "Blurriness", "value": blurriness}
+        ]
+    })
+
+    return sendCommand(command)
+
+def rgb_to_premiere_color3(rgb_color, alpha=1.0):
+    """Converts RGB (0–255) dict to Premiere Pro color format [r, g, b, a] with floats (0.0–1.0)."""
+    return [
+        rgb_color["red"] / 255.0,
+        rgb_color["green"] / 255.0,
+        rgb_color["blue"] / 255.0,
+        alpha
+    ]
+
+def rgb_to_premiere_color(rgb_color, alpha=255):
+    """
+    Converts an RGB(A) dict (0–255) to a 64-bit Premiere Pro color parameter (as int).
+    Matches Adobe's internal ARGB 16-bit fixed-point format.
+    """
+    def to16bit(value):
+        return int(round(value * 256))
+
+    r16 = to16bit(rgb_color["red"] / 255.0)
+    g16 = to16bit(rgb_color["green"] / 255.0)
+    b16 = to16bit(rgb_color["blue"] / 255.0)
+    a16 = to16bit(alpha / 255.0)
+
+    high = (a16 << 16) | r16       # top 32 bits: A | R
+    low = (g16 << 16) | b16        # bottom 32 bits: G | B
+
+    packed_color = (high << 32) | low
+    return packed_color
+
+
+
+
+@mcp.tool()
+def add_tint_effect(sequence_id: str, video_track_index: int, track_item_index: int, black_map:dict = {"red":0, "green":0, "blue":0}, white_map:dict = {"red":255, "green":255, "blue":255}, amount:int = 100):
+    """
+    Adds the tint effect to a clip at the specified track and position.
+    
+    This function applies a tint effect that maps the dark and light areas of the clip to specified colors.
+    
+    Args:
+        sequence_id (str) : The id for the sequence to add the effect to
+        video_track_index (int): The index of the video track containing the target clip.
+            Track indices start at 0 for the first video track and increment upward.
+            
+        track_item_index (int): The index of the clip within the track to apply the effect to.
+            Clip indices start at 0 for the first clip in the track and increment from left to right.
+            
+        black_map (dict): The RGB color values to map black/dark areas to, with keys "red", "green", and "blue".
+            Default is {"red":0, "green":0, "blue":0} (pure black).
+            
+        white_map (dict): The RGB color values to map white/light areas to, with keys "red", "green", and "blue".
+            Default is {"red":255, "green":255, "blue":255} (pure white).
+            
+        amount (int): The intensity of the tint effect as a percentage, ranging from 0 to 100.
+            Default is 100 (full tint effect).
+    """
+
+    command = createCommand("appendVideoFilter", {
+        "sequenceId": sequence_id,
+        "videoTrackIndex":video_track_index,
+        "trackItemIndex":track_item_index,
+        "effectName":"AE.ADBE Tint",
+        "properties":[
+            #{"name":"Map White To", "value":rgb_to_premiere_color(white_map)},
+            #{"name":"Map Black To", "value":rgb_to_premiere_color(black_map)}
+            {"name":"Map Black To", "value":rgb_to_premiere_color(black_map)}
+            #{"name":"Amount to Tint", "value":amount / 100}
+        ]
+    })
+
+    return sendCommand(command)
+
+
+
+@mcp.tool()
+def add_motion_blur_effect(sequence_id: str, video_track_index: int, track_item_index: int, direction: int, length: int):
+    """
+    Adds the directional blur effect to a clip at the specified track and position.
+    
+    This function applies a motion blur effect that simulates movement in a specific direction.
+    
+    Args:
+        sequence_id (str) : The id for the sequence to add the effect to
+        video_track_index (int): The index of the video track containing the target clip.
+            Track indices start at 0 for the first video track and increment upward.
+            
+        track_item_index (int): The index of the clip within the track to apply the effect to.
+            Clip indices start at 0 for the first clip in the track and increment from left to right.
+            
+        direction (int): The angle of the directional blur in degrees, ranging from 0 to 360.
+            - 0/360: Vertical blur upward
+            - 90: Horizontal blur to the right 
+            - 180: Vertical blur downward
+            - 270: Horizontal blur to the left
+            
+        length (int): The intensity or distance of the blur effect, ranging from 0 to 1000.
+    """
+
+    command = createCommand("appendVideoFilter", {
+        "sequenceId": sequence_id,
+        "videoTrackIndex":video_track_index,
+        "trackItemIndex":track_item_index,
+        "effectName":"AE.ADBE Motion Blur",
+        "properties":[
+            {"name":"Direction", "value":direction},
+            {"name":"Blur Length", "value":length}
+        ]
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
+def append_video_transition(sequence_id: str, video_track_index: int, track_item_index: int, transition_name: str, duration: int = 1.0, clip_alignment: float = 0.5):
+    """
+    Creates a transition between the specified clip and the adjacent clip on the timeline.
+    
+    In general, you should keep transitions short (no more than 2 seconds is a good rule).
+
+    Args:
+        sequence_id (str) : The id for the sequence to add the transition to
+        video_track_index (int): The index of the video track containing the target clips.
+        track_item_index (int): The index of the clip within the track to apply the transition to.
+        transition_name (str): The name of the transition to apply. Must be a valid transition name (see below).
+        duration (int): The duration of the transition in seconds.
+        clip_alignment (float): Controls how the transition is distributed between the two clips.
+                                Range: 0.0 to 1.0, where:
+                                - 0.0 places transition entirely on the right (later) clip
+                                - 0.5 centers the transition equally between both clips (default)
+                                - 1.0 places transition entirely on the left (earlier) clip
+ 
+    Valid Transition Names:
+        Basic Transitions (ADBE):
+            - "ADBE Additive Dissolve"
+            - "ADBE Cross Zoom"
+            - "ADBE Cube Spin"
+            - "ADBE Film Dissolve"
+            - "ADBE Flip Over"
+            - "ADBE Gradient Wipe"
+            - "ADBE Iris Cross"
+            - "ADBE Iris Diamond"
+            - "ADBE Iris Round"
+            - "ADBE Iris Square"
+            - "ADBE Page Peel"
+            - "ADBE Push"
+            - "ADBE Slide"
+            - "ADBE Wipe"
+            
+        After Effects Transitions (AE.ADBE):
+            - "AE.ADBE Center Split"
+            - "AE.ADBE Inset"
+            - "AE.ADBE Cross Dissolve New"
+            - "AE.ADBE Dip To White"
+            - "AE.ADBE Split"
+            - "AE.ADBE Whip"
+            - "AE.ADBE Non-Additive Dissolve"
+            - "AE.ADBE Dip To Black"
+            - "AE.ADBE Barn Doors"
+            - "AE.ADBE MorphCut"
+    """
+
+    command = createCommand("appendVideoTransition", {
+        "sequenceId": sequence_id,
+        "videoTrackIndex":video_track_index,
+        "trackItemIndex":track_item_index,
+        "transitionName":transition_name,
+        "clipAlignment":clip_alignment,
+        "duration":duration
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def set_video_clip_properties(sequence_id: str, video_track_index: int, track_item_index: int, opacity: int = 100, blend_mode: str = "NORMAL"):
+    """
+    Sets opacity and blend mode properties for a video clip in the timeline.
+
+    This function modifies the visual properties of a specific clip located on a specific video track
+    in the active Premiere Pro sequence. The clip is identified by its track index and item index
+    within that track.
+
+    Args:
+        sequence_id (str) : The id for the sequence to set the video clip properties
+        video_track_index (int): The index of the video track containing the target clip.
+            Track indices start at 0 for the first video track.
+        track_item_index (int): The index of the clip within the track to modify.
+            Clip indices start at 0 for the first clip on the track.
+        opacity (int, optional): The opacity value to set for the clip, as a percentage.
+            Valid values range from 0 (completely transparent) to 100 (completely opaque).
+            Defaults to 100.
+        blend_mode (str, optional): The blend mode to apply to the clip.
+            Must be one of the valid blend modes supported by Premiere Pro.
+            Defaults to "NORMAL".
+    """
+
+    command = createCommand("setVideoClipProperties", {
+        "sequenceId": sequence_id,
+        "videoTrackIndex":video_track_index,
+        "trackItemIndex":track_item_index,
+        "opacity":opacity,
+        "blendMode":blend_mode
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
+def import_media(file_paths:list):
+    """
+    Imports a list of media files into the active Premiere project.
+
+    Args:
+        file_paths (list): A list of file paths (strings) to import into the project.
+            Each path should be a complete, valid path to a media file supported by Premiere Pro.
+    """
+
+    command = createCommand("importMedia", {
+        "filePaths":file_paths
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def split_video_clip(sequence_id: str, video_track_index: int, track_item_index: int, split_time_seconds: float):
+    """
+    Splits a video clip at the specified time, creating two separate clips.
+
+    The original clip will end at the split point, and a new clip will be created
+    starting from the split point with the remainder of the content.
+
+    Args:
+        sequence_id (str): The id of the sequence containing the clip.
+        video_track_index (int): The index of the video track containing the clip.
+            Track indices start at 0.
+        track_item_index (int): The index of the clip within the track.
+            Clip indices start at 0.
+        split_time_seconds (float): The time in seconds (from sequence start) where the split should occur.
+            Must be within the clip's start and end time.
+    """
+    TICKS_PER_SECOND = 254016000000
+    split_time_ticks = int(split_time_seconds * TICKS_PER_SECOND)
+
+    command = createCommand("splitVideoClip", {
+        "sequenceId": sequence_id,
+        "videoTrackIndex": video_track_index,
+        "trackItemIndex": track_item_index,
+        "splitTimeTicks": split_time_ticks
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def split_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: int, split_time_seconds: float):
+    """
+    Splits an audio clip at the specified time, creating two separate clips.
+
+    Args:
+        sequence_id (str): The id of the sequence containing the clip.
+        audio_track_index (int): The index of the audio track containing the clip.
+            Track indices start at 0.
+        track_item_index (int): The index of the clip within the track.
+            Clip indices start at 0.
+        split_time_seconds (float): The time in seconds (from sequence start) where the split should occur.
+            Must be within the clip's start and end time.
+    """
+    TICKS_PER_SECOND = 254016000000
+    split_time_ticks = int(split_time_seconds * TICKS_PER_SECOND)
+
+    command = createCommand("splitAudioClip", {
+        "sequenceId": sequence_id,
+        "audioTrackIndex": audio_track_index,
+        "trackItemIndex": track_item_index,
+        "splitTimeTicks": split_time_ticks
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def split_clip_at_time(sequence_id: str, split_time_seconds: float,
+                       video_track_index: int = None, video_clip_index: int = 0,
+                       audio_track_index: int = None, audio_clip_index: int = 0):
+    """
+    Splits both video and audio clips at the specified time in a single operation.
+
+    This is the preferred method for splitting clips as it:
+    - Splits video and audio together (keeps them in sync)
+    - Creates a single undo entry (one Cmd+Z undoes the whole operation)
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        split_time_seconds (float): The time in seconds where the split should occur.
+        video_track_index (int, optional): Video track index. If None, video is not split.
+        video_clip_index (int, optional): Index of video clip on the track. Defaults to 0.
+        audio_track_index (int, optional): Audio track index. If None, audio is not split.
+        audio_clip_index (int, optional): Index of audio clip on the track. Defaults to 0.
+    """
+    TICKS_PER_SECOND = 254016000000
+    split_time_ticks = int(split_time_seconds * TICKS_PER_SECOND)
+
+    command = createCommand("splitClipAtTime", {
+        "sequenceId": sequence_id,
+        "splitTimeTicks": split_time_ticks,
+        "videoTrackIndex": video_track_index,
+        "videoClipIndex": video_clip_index,
+        "audioTrackIndex": audio_track_index,
+        "audioClipIndex": audio_clip_index
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def batch_split_clips(sequence_id: str, split_times_seconds: list,
+                      video_track_index: int = None, video_clip_index: int = 0,
+                      audio_track_index: int = None, audio_clip_index: int = 0):
+    """
+    Performs multiple splits at once - ideal for silence removal workflows.
+
+    Splits are performed from end to start to preserve clip indices.
+    Each split creates a separate undo entry.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        split_times_seconds (list): List of times in seconds where splits should occur.
+            Example: [10.5, 25.3, 42.0, 55.8]
+        video_track_index (int, optional): Video track index. If None, video is not split.
+        video_clip_index (int, optional): Index of video clip. Defaults to 0.
+        audio_track_index (int, optional): Audio track index. If None, audio is not split.
+        audio_clip_index (int, optional): Index of audio clip. Defaults to 0.
+    """
+    TICKS_PER_SECOND = 254016000000
+    split_time_ticks_list = [int(t * TICKS_PER_SECOND) for t in split_times_seconds]
+
+    command = createCommand("batchSplitClips", {
+        "sequenceId": sequence_id,
+        "splitTimeTicksList": split_time_ticks_list,
+        "videoTrackIndex": video_track_index,
+        "videoClipIndex": video_clip_index,
+        "audioTrackIndex": audio_track_index,
+        "audioClipIndex": audio_clip_index
+    })
+
+    return sendCommand(command)
+
+
+@mcp.tool()
+def trim_video_clip(sequence_id: str, video_track_index: int, track_item_index: int,
+                    new_start_seconds: float = None, new_end_seconds: float = None,
+                    new_in_point_seconds: float = None, new_out_point_seconds: float = None):
+    """
+    Trims a video clip by adjusting its start/end times or in/out points.
+
+    - Start/End times: Position on the timeline (sequence time)
+    - In/Out points: Which part of the source media is used
+
+    Args:
+        sequence_id (str): The id of the sequence containing the clip.
+        video_track_index (int): The index of the video track containing the clip.
+        track_item_index (int): The index of the clip within the track.
+        new_start_seconds (float, optional): New start position on timeline in seconds.
+        new_end_seconds (float, optional): New end position on timeline in seconds.
+        new_in_point_seconds (float, optional): New in-point in source media in seconds.
+        new_out_point_seconds (float, optional): New out-point in source media in seconds.
+    """
+    TICKS_PER_SECOND = 254016000000
+
+    options = {
+        "sequenceId": sequence_id,
+        "videoTrackIndex": video_track_index,
+        "trackItemIndex": track_item_index,
+    }
+
+    if new_start_seconds is not None:
+        options["newStartTicks"] = int(new_start_seconds * TICKS_PER_SECOND)
+    if new_end_seconds is not None:
+        options["newEndTicks"] = int(new_end_seconds * TICKS_PER_SECOND)
+    if new_in_point_seconds is not None:
+        options["newInPointTicks"] = int(new_in_point_seconds * TICKS_PER_SECOND)
+    if new_out_point_seconds is not None:
+        options["newOutPointTicks"] = int(new_out_point_seconds * TICKS_PER_SECOND)
+
+    command = createCommand("trimVideoClip", options)
+    return sendCommand(command)
+
+
+@mcp.tool()
+def trim_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: int,
+                    new_start_seconds: float = None, new_end_seconds: float = None,
+                    new_in_point_seconds: float = None, new_out_point_seconds: float = None):
+    """
+    Trims an audio clip by adjusting its start/end times or in/out points.
+
+    Args:
+        sequence_id (str): The id of the sequence containing the clip.
+        audio_track_index (int): The index of the audio track containing the clip.
+        track_item_index (int): The index of the clip within the track.
+        new_start_seconds (float, optional): New start position on timeline in seconds.
+        new_end_seconds (float, optional): New end position on timeline in seconds.
+        new_in_point_seconds (float, optional): New in-point in source media in seconds.
+        new_out_point_seconds (float, optional): New out-point in source media in seconds.
+    """
+    TICKS_PER_SECOND = 254016000000
+
+    options = {
+        "sequenceId": sequence_id,
+        "audioTrackIndex": audio_track_index,
+        "trackItemIndex": track_item_index,
+    }
+
+    if new_start_seconds is not None:
+        options["newStartTicks"] = int(new_start_seconds * TICKS_PER_SECOND)
+    if new_end_seconds is not None:
+        options["newEndTicks"] = int(new_end_seconds * TICKS_PER_SECOND)
+    if new_in_point_seconds is not None:
+        options["newInPointTicks"] = int(new_in_point_seconds * TICKS_PER_SECOND)
+    if new_out_point_seconds is not None:
+        options["newOutPointTicks"] = int(new_out_point_seconds * TICKS_PER_SECOND)
+
+    command = createCommand("trimAudioClip", options)
+    return sendCommand(command)
+
+
+@mcp.tool()
+def remove_video_clip_range(sequence_id: str, video_track_index: int, track_item_index: int,
+                            range_start_seconds: float, range_end_seconds: float):
+    """
+    Removes a section from a video clip, keeping the content before and after the range.
+
+    This is useful for removing silence or unwanted sections. The clip will be split
+    at the range boundaries, and the middle section will be removed (the second part
+    will be moved to connect with the first part).
+
+    Args:
+        sequence_id (str): The id of the sequence containing the clip.
+        video_track_index (int): The index of the video track containing the clip.
+        track_item_index (int): The index of the clip within the track.
+        range_start_seconds (float): Start of the range to remove (in sequence time).
+        range_end_seconds (float): End of the range to remove (in sequence time).
+    """
+    TICKS_PER_SECOND = 254016000000
+
+    command = createCommand("removeVideoClipRange", {
+        "sequenceId": sequence_id,
+        "videoTrackIndex": video_track_index,
+        "trackItemIndex": track_item_index,
+        "rangeStartTicks": int(range_start_seconds * TICKS_PER_SECOND),
+        "rangeEndTicks": int(range_end_seconds * TICKS_PER_SECOND)
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
+def get_player_position(sequence_id: str):
+    """
+    Gets the current playhead/player position in the sequence.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+
+    Returns:
+        Dict with position in ticks and seconds.
+    """
+    command = createCommand("getPlayerPosition", {
+        "sequenceId": sequence_id
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def set_player_position(sequence_id: str, position_seconds: float):
+    """
+    Sets the playhead/player position in the sequence.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        position_seconds (float): The position in seconds from the start of the sequence.
+    """
+    TICKS_PER_SECOND = 254016000000
+    position_ticks = int(position_seconds * TICKS_PER_SECOND)
+
+    command = createCommand("setPlayerPosition", {
+        "sequenceId": sequence_id,
+        "positionTicks": position_ticks
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def add_marker(sequence_id: str, start_time_seconds: float, name: str = "Marker",
+               marker_type: str = "Comment", duration_seconds: float = None, comments: str = ""):
+    """
+    Adds a marker to the sequence at the specified time.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        start_time_seconds (float): Position in seconds where the marker should be placed.
+        name (str, optional): Name of the marker. Defaults to "Marker".
+        marker_type (str, optional): Type of marker ("Comment", "Chapter", "Segmentation", etc.). Defaults to "Comment".
+        duration_seconds (float, optional): Duration of the marker in seconds. Defaults to None (point marker).
+        comments (str, optional): Additional comments for the marker. Defaults to "".
+    """
+    TICKS_PER_SECOND = 254016000000
+
+    options = {
+        "sequenceId": sequence_id,
+        "startTimeTicks": int(start_time_seconds * TICKS_PER_SECOND),
+        "name": name,
+        "markerType": marker_type,
+        "comments": comments
+    }
+
+    if duration_seconds is not None:
+        options["durationTicks"] = int(duration_seconds * TICKS_PER_SECOND)
+
+    command = createCommand("addMarker", options)
+    return sendCommand(command)
+
+
+@mcp.tool()
+def get_markers(sequence_id: str):
+    """
+    Gets all markers in the sequence.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+
+    Returns:
+        Dict with list of markers including name, type, position, duration, and comments.
+    """
+    command = createCommand("getMarkers", {
+        "sequenceId": sequence_id
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def remove_marker(sequence_id: str, marker_index: int):
+    """
+    Removes a marker from the sequence by its index.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        marker_index (int): The index of the marker to remove (0-based).
+    """
+    command = createCommand("removeMarker", {
+        "sequenceId": sequence_id,
+        "markerIndex": marker_index
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def remove_clips(sequence_id: str, video_items: list = None, audio_items: list = None, ripple: bool = False):
+    """
+    Removes clips from the timeline.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        video_items (list, optional): List of video clips to remove. Each item should be a dict with
+            "trackIndex" and "clipIndex" keys.
+            Example: [{"trackIndex": 0, "clipIndex": 0}, {"trackIndex": 0, "clipIndex": 1}]
+        audio_items (list, optional): List of audio clips to remove. Same format as video_items.
+        ripple (bool, optional): If True, close the gap after removing clips. Defaults to False.
+    """
+    command = createCommand("removeClips", {
+        "sequenceId": sequence_id,
+        "videoItems": video_items or [],
+        "audioItems": audio_items or [],
+        "ripple": ripple
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def duplicate_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool,
+                   time_offset_seconds: float, video_track_offset: int = 0, audio_track_offset: int = 0,
+                   insert: bool = False):
+    """
+    Duplicates a clip on the timeline.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        track_index (int): The index of the track containing the clip.
+        clip_index (int): The index of the clip to duplicate.
+        is_video (bool): True if duplicating a video clip, False for audio.
+        time_offset_seconds (float): Where to place the duplicate (in seconds from sequence start).
+        video_track_offset (int, optional): Number of tracks to offset for video. Defaults to 0.
+        audio_track_offset (int, optional): Number of tracks to offset for audio. Defaults to 0.
+        insert (bool, optional): If True, insert and shift other clips. Defaults to False (overwrite).
+    """
+    TICKS_PER_SECOND = 254016000000
+
+    command = createCommand("duplicateClip", {
+        "sequenceId": sequence_id,
+        "trackIndex": track_index,
+        "clipIndex": clip_index,
+        "isVideo": is_video,
+        "timeOffsetTicks": int(time_offset_seconds * TICKS_PER_SECOND),
+        "videoTrackOffset": video_track_offset,
+        "audioTrackOffset": audio_track_offset,
+        "insert": insert
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def move_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool, move_time_seconds: float):
+    """
+    Moves a clip by a time offset on the timeline (relative move).
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        track_index (int): The index of the track containing the clip.
+        clip_index (int): The index of the clip to move.
+        is_video (bool): True if moving a video clip, False for audio.
+        move_time_seconds (float): Time offset in seconds (positive = right, negative = left).
+    """
+    TICKS_PER_SECOND = 254016000000
+
+    command = createCommand("moveClip", {
+        "sequenceId": sequence_id,
+        "trackIndex": track_index,
+        "clipIndex": clip_index,
+        "isVideo": is_video,
+        "moveTimeTicks": int(move_time_seconds * TICKS_PER_SECOND)
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def set_clip_position(sequence_id: str, track_index: int, clip_index: int, is_video: bool, new_start_seconds: float):
+    """
+    Moves a clip to an absolute position on the timeline.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        track_index (int): The index of the track containing the clip.
+        clip_index (int): The index of the clip to move.
+        is_video (bool): True if moving a video clip, False for audio.
+        new_start_seconds (float): The new start position in seconds (absolute, from sequence start).
+    """
+    TICKS_PER_SECOND = 254016000000
+
+    command = createCommand("setClipPosition", {
+        "sequenceId": sequence_id,
+        "trackIndex": track_index,
+        "clipIndex": clip_index,
+        "isVideo": is_video,
+        "newStartTicks": int(new_start_seconds * TICKS_PER_SECOND)
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def get_sequence_settings(sequence_id: str):
+    """
+    Gets the settings and info for a sequence.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+
+    Returns:
+        Dict with sequence name, id, frame dimensions, and duration.
+    """
+    command = createCommand("getSequenceSettings", {
+        "sequenceId": sequence_id
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def rename_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool, new_name: str):
+    """
+    Renames a clip in the timeline.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        track_index (int): The index of the track containing the clip.
+        clip_index (int): The index of the clip to rename.
+        is_video (bool): True if renaming a video clip, False for audio.
+        new_name (str): The new name for the clip.
+    """
+    command = createCommand("renameClip", {
+        "sequenceId": sequence_id,
+        "trackIndex": track_index,
+        "clipIndex": clip_index,
+        "isVideo": is_video,
+        "newName": new_name
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def delete_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool):
+    """
+    Delete a specific clip WITHOUT affecting other tracks.
+
+    This is a convenience wrapper around remove_clips that deletes a single clip
+    without rippling (leaves a gap where the clip was). Use this when you want to
+    remove clips from specific tracks without shifting content on other tracks.
+
+    For track-specific editing workflows:
+    1. Use get_clip_info() to get clip details
+    2. Use delete_clip() to remove unwanted clips (leaves gaps)
+    3. Use set_clip_position() to move remaining clips into position
+
+    Alternative: Use set_video_clip_disabled() or set_audio_clip_disabled() to
+    disable clips instead of deleting them (non-destructive, can be re-enabled).
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        track_index (int): The index of the track containing the clip.
+        clip_index (int): The index of the clip to delete.
+        is_video (bool): True if deleting a video clip, False for audio.
+
+    Returns:
+        Dict with success message.
+    """
+    if is_video:
+        video_items = [{"trackIndex": track_index, "clipIndex": clip_index}]
+        audio_items = []
+    else:
+        video_items = []
+        audio_items = [{"trackIndex": track_index, "clipIndex": clip_index}]
+
+    command = createCommand("removeClips", {
+        "sequenceId": sequence_id,
+        "videoItems": video_items,
+        "audioItems": audio_items,
+        "ripple": False  # Never ripple - this is the key difference
+    })
+    return sendCommand(command)
+
+
+@mcp.tool()
+def get_clip_info(sequence_id: str, track_index: int, clip_index: int, is_video: bool):
+    """
+    Get detailed information about a specific clip.
+
+    Returns start time, end time, duration, in/out points, and clip name.
+    Useful for understanding clip positions before editing operations.
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        track_index (int): The index of the track containing the clip.
+        clip_index (int): The index of the clip.
+        is_video (bool): True for video clip, False for audio clip.
+
+    Returns:
+        Dict with clip details:
+        - name: Clip name
+        - startTimeTicks/startTimeSeconds: Timeline position where clip starts
+        - endTimeTicks/endTimeSeconds: Timeline position where clip ends
+        - durationTicks/durationSeconds: Clip duration
+        - inPointTicks/inPointSeconds: Source media in-point
+        - outPointTicks/outPointSeconds: Source media out-point
+        - disabled: Whether the clip is disabled
+    """
+    command = createCommand("getClipInfo", {
+        "sequenceId": sequence_id,
+        "trackIndex": track_index,
+        "clipIndex": clip_index,
+        "isVideo": is_video
+    })
+    return sendCommand(command)
+
+
+# =============================================================================
+# KEYBOARD SHORTCUT TOOLS (via AppleScript)
+# These bypass the UXP API and send keystrokes directly to Premiere Pro
+# =============================================================================
+
+@mcp.tool()
+def send_keystroke(key: str, command: bool = False, shift: bool = False, option: bool = False, control: bool = False):
+    """
+    Send a keyboard shortcut to Premiere Pro.
+
+    This uses AppleScript to send keystrokes directly to Premiere,
+    bypassing the UXP API limitations.
+
+    Args:
+        key (str): The key to press (single character like "t", "e", "z", etc.)
+        command (bool): Hold Command key. Defaults to False.
+        shift (bool): Hold Shift key. Defaults to False.
+        option (bool): Hold Option key. Defaults to False.
+        control (bool): Hold Control key. Defaults to False.
+
+    Example:
+        send_keystroke("t", command=True)  # Cmd+T
+        send_keystroke("z", command=True)  # Cmd+Z (undo)
+    """
+    modifiers = []
+    if command:
+        modifiers.append("command")
+    if shift:
+        modifiers.append("shift")
+    if option:
+        modifiers.append("option")
+    if control:
+        modifiers.append("control")
+
+    send_keystroke_to_premiere(key, modifiers)
+    return {"success": True, "key": key, "modifiers": modifiers}
+
+
+@mcp.tool()
+def cut_at_playhead():
+    """
+    Cut/razor all tracks at the current playhead position.
+
+    This sends Cmd+D to Premiere Pro.
+    Make sure the playhead is at the desired position first using set_player_position.
+    """
+    send_keystroke_to_premiere("d", ["command"])
+    return {"success": True, "action": "cut_at_playhead"}
+
+
+@mcp.tool()
+def ripple_delete():
+    """
+    Ripple delete the clip segment at the current playhead position.
+
+    This sends Cmd+E (or your configured ripple delete shortcut) to Premiere Pro.
+    The clip under the playhead will be deleted and the gap will be closed.
+    """
+    send_keystroke_to_premiere("e", ["command"])
+    return {"success": True, "action": "ripple_delete"}
+
+
+@mcp.tool()
+def undo():
+    """
+    Undo the last action in Premiere Pro.
+
+    Sends Cmd+Z to Premiere Pro.
+    """
+    send_keystroke_to_premiere("z", ["command"])
+    return {"success": True, "action": "undo"}
+
+
+@mcp.tool()
+def redo():
+    """
+    Redo the last undone action in Premiere Pro.
+
+    Sends Cmd+Shift+Z to Premiere Pro.
+    """
+    send_keystroke_to_premiere("z", ["command", "shift"])
+    return {"success": True, "action": "redo"}
+
+
+@mcp.tool()
+def select_all():
+    """
+    Select all clips in the timeline.
+
+    Sends Cmd+A to Premiere Pro.
+    """
+    send_keystroke_to_premiere("a", ["command"])
+    return {"success": True, "action": "select_all"}
+
+
+@mcp.tool()
+def deselect_all():
+    """
+    Deselect all clips in the timeline.
+
+    Sends Cmd+Shift+A to Premiere Pro.
+    """
+    send_keystroke_to_premiere("a", ["command", "shift"])
+    return {"success": True, "action": "deselect_all"}
+
+
+@mcp.tool()
+def delete_selected():
+    """
+    Delete the currently selected clips.
+
+    Sends Delete/Backspace key to Premiere Pro.
+    """
+    # Key code 51 is Delete/Backspace
+    send_key_code_to_premiere(51)
+    return {"success": True, "action": "delete_selected"}
+
+
+@mcp.tool()
+def play_pause():
+    """
+    Toggle play/pause in Premiere Pro.
+
+    Sends Space key to Premiere Pro.
+    """
+    send_keystroke_to_premiere(" ", [])
+    return {"success": True, "action": "play_pause"}
+
+
+@mcp.tool()
+def go_to_start():
+    """
+    Move playhead to the start of the sequence.
+
+    Sends Home key to Premiere Pro.
+    """
+    # Key code 115 is Home
+    send_key_code_to_premiere(115)
+    return {"success": True, "action": "go_to_start"}
+
+
+@mcp.tool()
+def go_to_end():
+    """
+    Move playhead to the end of the sequence.
+
+    Sends End key to Premiere Pro.
+    """
+    # Key code 119 is End
+    send_key_code_to_premiere(119)
+    return {"success": True, "action": "go_to_end"}
+
+
+@mcp.tool()
+def remove_silence_segments(sequence_id: str, silence_segments: list):
+    """
+    Remove silence segments from the timeline.
+
+    This is the PREFERRED method for removing silence or unwanted sections.
+    For each segment, it:
+    1. Cuts at the START of the silence
+    2. Cuts at the END of the silence
+    3. Moves playhead INTO the silence segment
+    4. Ripple deletes (Cmd+E) to remove and close gap
+
+    Args:
+        sequence_id (str): The id of the sequence.
+        silence_segments (list): List of segments to remove. Each segment is a dict with:
+            - "start": Start time in seconds
+            - "end": End time in seconds
+            Example: [{"start": 10.5, "end": 12.3}, {"start": 25.0, "end": 27.5}]
+
+    Note: Segments are processed from END to START to preserve earlier timecodes.
+    """
+    TICKS_PER_SECOND = 254016000000
+
+    # Sort segments by start time in descending order (process from end to start)
+    sorted_segments = sorted(silence_segments, key=lambda x: x["start"], reverse=True)
+
+    results = []
+    for seg in sorted_segments:
+        try:
+            start = seg["start"]
+            end = seg["end"]
+            middle = (start + end) / 2  # Middle of the segment
+
+            # Step 1: Cut at END of silence
+            position_ticks = int(end * TICKS_PER_SECOND)
+            command = createCommand("setPlayerPosition", {
+                "sequenceId": sequence_id,
+                "positionTicks": position_ticks
+            })
+            sendCommand(command)
+            time.sleep(0.1)
+            send_keystroke_to_premiere("d", ["command"])  # Cmd+D to cut
+            time.sleep(0.1)
+
+            # Step 2: Cut at START of silence
+            position_ticks = int(start * TICKS_PER_SECOND)
+            command = createCommand("setPlayerPosition", {
+                "sequenceId": sequence_id,
+                "positionTicks": position_ticks
+            })
+            sendCommand(command)
+            time.sleep(0.1)
+            send_keystroke_to_premiere("d", ["command"])  # Cmd+D to cut
+            time.sleep(0.1)
+
+            # Step 3: Move playhead INTO the silence segment (middle)
+            position_ticks = int(middle * TICKS_PER_SECOND)
+            command = createCommand("setPlayerPosition", {
+                "sequenceId": sequence_id,
+                "positionTicks": position_ticks
+            })
+            sendCommand(command)
+            time.sleep(0.1)
+
+            # Step 4: Ripple delete (Cmd+E)
+            send_keystroke_to_premiere("e", ["command"])
+            time.sleep(0.15)
+
+            results.append({"start": start, "end": end, "success": True})
+        except Exception as e:
+            results.append({"start": seg.get("start"), "end": seg.get("end"), "success": False, "error": str(e)})
+
+    return {
+        "action": "remove_silence_segments",
+        "processed": len(sorted_segments),
+        "results": results
+    }
+
+
+@mcp.tool()
+def cut_and_ripple_delete_at_times(sequence_id: str, times_seconds: list, video_track_index: int = 0, audio_track_index: int = 0):
+    """
+    DEPRECATED: Use remove_silence_segments instead for removing sections.
+
+    This function cuts at each time and immediately ripple deletes, which may not work
+    as expected. Use remove_silence_segments with start/end pairs instead.
+    """
+    TICKS_PER_SECOND = 254016000000
+    sorted_times = sorted(times_seconds, reverse=True)
+
+    results = []
+    for t in sorted_times:
+        try:
+            position_ticks = int(t * TICKS_PER_SECOND)
+            command = createCommand("setPlayerPosition", {
+                "sequenceId": sequence_id,
+                "positionTicks": position_ticks
+            })
+            sendCommand(command)
+            time.sleep(0.15)
+
+            send_keystroke_to_premiere("d", ["command"])
+            time.sleep(0.1)
+
+            send_keystroke_to_premiere("e", ["command"])
+            time.sleep(0.1)
+
+            results.append({"time": t, "success": True})
+        except Exception as e:
+            results.append({"time": t, "success": False, "error": str(e)})
+
+    return {
+        "action": "cut_and_ripple_delete_at_times",
+        "processed": len(sorted_times),
+        "results": results
+    }
+
+
+@mcp.resource("config://get_instructions")
+def get_instructions() -> str:
+    """Read this first! Returns information and instructions on how to use Premiere Pro and this API"""
+
+    return f"""
+    You are a Premiere Pro and video expert who is creative and loves to help other people learn to use Premiere and create.
+
+    Rules to follow:
+
+    1. Think deeply about how to solve the task
+    2. Always check your work
+    3. Read the info for the API calls to make sure you understand the requirements and arguments
+    4. In general, add clips first, then effects, then transitions
+    5. As a general rule keep transitions short (no more that 2 seconds is a good rule), and there should not be a gap between clips (or else the transition may not work)
+
+    IMPORTANT: To create a new project and add clips:
+    1. Create new project (create_project)
+    2. Add media to the project (import_media)
+    3. Create a new sequence with media (should always add video / image clips before audio.(create_sequence_from_media). This will create a sequence with the clips.
+    4. The first clip you add will determine the dimensions / resolution of the sequence
+
+    AVAILABLE TOOLS:
+
+    Project Management:
+    - create_project, open_project, save_project, save_project_as
+    - get_project_info
+
+    Sequence Management:
+    - create_sequence_from_media, set_active_sequence
+    - get_sequence_settings
+
+    Media & Timeline:
+    - import_media - import files into project
+    - add_media_to_sequence - add clips to timeline
+
+    Clip Editing:
+    - split_video_clip, split_audio_clip - split clips at a specific time
+    - trim_video_clip, trim_audio_clip - adjust in/out points and timeline position
+    - remove_video_clip_range - remove a section from a clip (for silence removal)
+    - remove_clips - delete clips from timeline (with optional ripple)
+    - delete_clip - delete a single clip WITHOUT ripple (track-specific, leaves gaps)
+    - get_clip_info - get detailed info about a clip (start, end, duration, in/out points)
+    - duplicate_clip - clone a clip
+    - move_clip - reposition clips on timeline (relative)
+    - set_clip_position - move clip to absolute position
+    - rename_clip - change clip name
+    - set_video_clip_disabled, set_audio_clip_disabled - enable/disable clips
+
+    Effects & Transitions:
+    - add_black_and_white_effect, add_gaussian_blur_effect, add_tint_effect, add_motion_blur_effect
+    - append_video_transition - add transitions between clips
+    - set_video_clip_properties - opacity and blend mode
+
+    Audio:
+    - set_audio_track_mute - mute/unmute audio tracks
+
+    Markers:
+    - add_marker - add markers to sequence
+    - get_markers - list all markers
+    - remove_marker - delete a marker
+
+    Playhead Control:
+    - get_player_position - get current playhead position
+    - set_player_position - move playhead
+
+    Export:
+    - export_frame - export a single frame as PNG
+
+    GENERAL TIPS:
+
+    Audio and Video clips are added on separate Audio / Video tracks, which you can access via their index.
+
+    When adding a video clip that contains audio, the audio will be placed on a separate audio track.
+
+    You can remove clips using remove_clips, or disable them using set_video_clip_disabled/set_audio_clip_disabled.
+
+    For silence removal workflow:
+    1. Detect silence segments (external tool)
+    2. Use split_video_clip/split_audio_clip to split at silence boundaries
+    3. Use remove_clips with ripple=True to remove silent sections and close gaps
+
+    TRACK-SPECIFIC EDITING (avoiding ripple delete issues):
+    Ripple delete (Cmd+E) affects ALL unlocked tracks - this is Premiere's design.
+    To edit specific tracks without affecting others, use API-based clip management:
+
+    Workflow for editing V2/A2 without affecting V1/A1:
+    1. get_full_project_data() - see all clips and their positions
+    2. get_clip_info() - get details on specific clips
+    3. delete_clip() - remove clips WITHOUT rippling (leaves gaps)
+    4. set_clip_position() - move remaining clips into position
+
+    Alternative (non-destructive):
+    - set_video_clip_disabled() / set_audio_clip_disabled() - disable unwanted clips
+    - Disabled clips don't play but can be re-enabled later
+
+    If you want to do a transition between two clips, the clips must be on the same track and there should not be a gap between them. Place the transition on the first clip.
+
+    Video clips with a higher track index will overlap and hide those with lower index if they overlap.
+
+    When adding images to a sequence, they will have a duration of 5 seconds.
+
+    TIME FORMAT:
+    - All time values in the API use seconds (float)
+    - Internally Premiere uses ticks (254016000000 ticks per second)
+    - The API handles the conversion automatically
+
+    blend_modes: {", ".join(BLEND_MODES)}
+    """
+
+
+BLEND_MODES = [
+    "COLOR",
+    "COLORBURN",
+    "COLORDODGE",
+    "DARKEN",
+    "DARKERCOLOR",
+    "DIFFERENCE",
+    "DISSOLVE",
+    "EXCLUSION",
+    "HARDLIGHT",
+    "HARDMIX",
+    "HUE",
+    "LIGHTEN",
+    "LIGHTERCOLOR",
+    "LINEARBURN",
+    "LINEARDODGE",
+    "LINEARLIGHT",
+    "LUMINOSITY",
+    "MULTIPLY",
+    "NORMAL",
+    "OVERLAY",
+    "PINLIGHT",
+    "SATURATION",
+    "SCREEN",
+    "SOFTLIGHT",
+    "VIVIDLIGHT",
+    "SUBTRACT",
+    "DIVIDE"
+]

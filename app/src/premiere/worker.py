@@ -104,9 +104,6 @@ class Worker:
             if result.transcript_path:
                 job.transcript_path = str(result.transcript_path)
 
-            if result.thumbnail_path:
-                job.thumbnail_path = str(result.thumbnail_path)
-
             if result.clips_dir:
                 job.clips_dir = str(result.clips_dir)
                 job.clips = [

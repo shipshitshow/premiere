@@ -2,13 +2,14 @@
   "mcpServers": {
     "premiere": {
       "type": "stdio",
-      "command": "python3",
+      "command": "/Users/decod3rslabs/www/premiere/.venv/bin/python3",
       "args": ["-m", "server"],
       "cwd": "./mcp/premiere-mcp"
     },
     "adobe-premiere": {
       "type": "stdio",
-      "command": "adobe-premiere",
+      "command": "/Users/decod3rslabs/www/premiere/.venv/bin/adobe-premiere",
+      "timeout": 300,
       "env": {
         "SCRIPTS_DIR": "/Users/decod3rslabs/www/premiere/scripts"
       }

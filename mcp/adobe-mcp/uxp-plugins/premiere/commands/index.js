@@ -1024,6 +1024,34 @@ const splitAudioClip = async (command) => {
     }
 }
 
+const findLinkedClip = async (sequence, trackItem, isVideo, linkedTrackIndex) => {
+    const startTime = await trackItem.getStartTime()
+    const sourceTicks = BigInt(startTime.ticks)
+
+    let counterpartTrack
+    if (isVideo) {
+        // Source is video, find on audio track
+        counterpartTrack = await sequence.getAudioTrack(linkedTrackIndex)
+    } else {
+        // Source is audio, find on video track
+        counterpartTrack = await sequence.getVideoTrack(linkedTrackIndex)
+    }
+
+    if (!counterpartTrack) return null
+
+    const clips = await counterpartTrack.getTrackItems(1, false)
+    for (const clip of clips) {
+        const clipStart = await clip.getStartTime()
+        const clipTicks = BigInt(clipStart.ticks)
+        // Match within a small tolerance (1 tick)
+        if (sourceTicks - clipTicks <= 1n && clipTicks - sourceTicks <= 1n) {
+            return clip
+        }
+    }
+
+    return null
+}
+
 const trimVideoClip = async (command) => {
     const options = command.options
     const id = options.sequenceId
@@ -1036,6 +1064,9 @@ const trimVideoClip = async (command) => {
     }
 
     const trackItem = await getVideoTrack(sequence, options.videoTrackIndex, options.trackItemIndex)
+
+    const linked = options.linked || false
+    const linkedTrackIndex = options.linkedTrackIndex !== undefined ? options.linkedTrackIndex : 0
 
     let actions = []
 
@@ -1059,8 +1090,31 @@ const trimVideoClip = async (command) => {
         actions.push(trackItem.createSetOutPointAction(newOutPoint))
     }
 
+    // Also trim the linked audio clip
+    if (linked) {
+        const linkedClip = await findLinkedClip(sequence, trackItem, true, linkedTrackIndex)
+        if (linkedClip) {
+            if (options.newStartTicks !== undefined && options.newStartTicks !== null) {
+                const newStart = await app.TickTime.createWithTicks(options.newStartTicks.toString())
+                actions.push(linkedClip.createSetStartAction(newStart))
+            }
+            if (options.newEndTicks !== undefined && options.newEndTicks !== null) {
+                const newEnd = await app.TickTime.createWithTicks(options.newEndTicks.toString())
+                actions.push(linkedClip.createSetEndAction(newEnd))
+            }
+            if (options.newInPointTicks !== undefined && options.newInPointTicks !== null) {
+                const newInPoint = await app.TickTime.createWithTicks(options.newInPointTicks.toString())
+                actions.push(linkedClip.createSetInPointAction(newInPoint))
+            }
+            if (options.newOutPointTicks !== undefined && options.newOutPointTicks !== null) {
+                const newOutPoint = await app.TickTime.createWithTicks(options.newOutPointTicks.toString())
+                actions.push(linkedClip.createSetOutPointAction(newOutPoint))
+            }
+        }
+    }
+
     if (actions.length > 0) {
-        execute(() => actions, project)
+        execute(() => actions, project, "Trim clip")
     }
 
     return { message: "Clip trimmed successfully" }
@@ -1079,6 +1133,9 @@ const trimAudioClip = async (command) => {
 
     const trackItem = await getAudioTrack(sequence, options.audioTrackIndex, options.trackItemIndex)
 
+    const linked = options.linked || false
+    const linkedTrackIndex = options.linkedTrackIndex !== undefined ? options.linkedTrackIndex : 0
+
     let actions = []
 
     if (options.newStartTicks !== undefined && options.newStartTicks !== null) {
@@ -1101,8 +1158,31 @@ const trimAudioClip = async (command) => {
         actions.push(trackItem.createSetOutPointAction(newOutPoint))
     }
 
+    // Also trim the linked video clip
+    if (linked) {
+        const linkedClip = await findLinkedClip(sequence, trackItem, false, linkedTrackIndex)
+        if (linkedClip) {
+            if (options.newStartTicks !== undefined && options.newStartTicks !== null) {
+                const newStart = await app.TickTime.createWithTicks(options.newStartTicks.toString())
+                actions.push(linkedClip.createSetStartAction(newStart))
+            }
+            if (options.newEndTicks !== undefined && options.newEndTicks !== null) {
+                const newEnd = await app.TickTime.createWithTicks(options.newEndTicks.toString())
+                actions.push(linkedClip.createSetEndAction(newEnd))
+            }
+            if (options.newInPointTicks !== undefined && options.newInPointTicks !== null) {
+                const newInPoint = await app.TickTime.createWithTicks(options.newInPointTicks.toString())
+                actions.push(linkedClip.createSetInPointAction(newInPoint))
+            }
+            if (options.newOutPointTicks !== undefined && options.newOutPointTicks !== null) {
+                const newOutPoint = await app.TickTime.createWithTicks(options.newOutPointTicks.toString())
+                actions.push(linkedClip.createSetOutPointAction(newOutPoint))
+            }
+        }
+    }
+
     if (actions.length > 0) {
-        execute(() => actions, project)
+        execute(() => actions, project, "Trim clip")
     }
 
     return { message: "Audio clip trimmed successfully" }
@@ -1328,15 +1408,30 @@ const removeClips = async (command) => {
         throw new Error(`removeClips : Requires an active sequence.`)
     }
 
+    const linked = options.linked || false
+    const linkedTrackIndex = options.linkedTrackIndex !== undefined ? options.linkedTrackIndex : 0
+
     // Build track item selection
     const selection = new app.TrackItemSelection()
     let itemCount = 0
+    let hasVideo = false
+    let hasAudio = false
 
     if (options.videoItems && options.videoItems.length > 0) {
         for (const item of options.videoItems) {
             const trackItem = await getVideoTrack(sequence, item.trackIndex, item.clipIndex)
             selection.addItem(trackItem)
             itemCount++
+            hasVideo = true
+
+            if (linked) {
+                const linkedClip = await findLinkedClip(sequence, trackItem, true, linkedTrackIndex)
+                if (linkedClip) {
+                    selection.addItem(linkedClip)
+                    itemCount++
+                    hasAudio = true
+                }
+            }
         }
     }
 
@@ -1345,6 +1440,16 @@ const removeClips = async (command) => {
             const trackItem = await getAudioTrack(sequence, item.trackIndex, item.clipIndex)
             selection.addItem(trackItem)
             itemCount++
+            hasAudio = true
+
+            if (linked) {
+                const linkedClip = await findLinkedClip(sequence, trackItem, false, linkedTrackIndex)
+                if (linkedClip) {
+                    selection.addItem(linkedClip)
+                    itemCount++
+                    hasVideo = true
+                }
+            }
         }
     }
 
@@ -1355,13 +1460,14 @@ const removeClips = async (command) => {
     const editor = await app.SequenceEditor.getEditor(sequence)
     const ripple = options.ripple !== undefined ? options.ripple : false
 
-    // Use Constants.MediaType.VIDEO (or just use the selection's media type)
-    // Adobe sample uses only 3 params: selection, ripple, mediaType
+    // Use correct MediaType based on what's in the selection
+    const mediaType = hasVideo ? app.Constants.MediaType.VIDEO : app.Constants.MediaType.AUDIO
+
     execute(() => {
         const action = editor.createRemoveItemsAction(
             selection,
             ripple,
-            app.Constants.MediaType.VIDEO
+            mediaType
         )
         return [action]
     }, project, "Remove clips")
@@ -1391,14 +1497,151 @@ const duplicateClip = async (command) => {
 
     const timeOffset = await app.TickTime.createWithTicks(options.timeOffsetTicks.toString())
 
+    const linked = options.linked || false
+    const linkedTrackIndex = options.linkedTrackIndex !== undefined ? options.linkedTrackIndex : 0
+    const insert = options.insert || false
+
+    // INSERT MODE: 3-phase approach.
+    // createCloneTrackItemAction places clones at the SOURCE's position, not at
+    // an arbitrary absolute time. So we can't use it to place a clip at position 0
+    // when the source is at 191.7s. Instead:
+    //   Phase 1: Shift all clips forward by source duration (creates gap)
+    //   Phase 2: Insert source's project item at target position (fills gap)
+    //   Phase 3: Trim inserted clip to match source's in/out points
+    if (insert) {
+        const sourceDuration = await trackItem.getDuration()
+        const sourceInPoint = await trackItem.getInPoint()
+        const sourceProjectItem = await trackItem.getProjectItem()
+        const insertionTicks = BigInt(options.timeOffsetTicks)
+
+        // Determine track indices for insertion
+        let videoTrackIdx, audioTrackIdx
+        if (options.isVideo) {
+            videoTrackIdx = options.trackIndex
+            audioTrackIdx = linked ? linkedTrackIndex : 0
+        } else {
+            videoTrackIdx = linked ? linkedTrackIndex : 0
+            audioTrackIdx = options.trackIndex
+        }
+
+        // Phase 1: Shift all clips at or after insertion point forward
+        let shiftActions = []
+        if (linked) {
+            const videoTrackCount = await sequence.getVideoTrackCount()
+            for (let i = 0; i < videoTrackCount; i++) {
+                const track = await sequence.getVideoTrack(i)
+                const clips = await track.getTrackItems(1, false)
+                for (const clip of clips) {
+                    const clipStart = await clip.getStartTime()
+                    if (BigInt(clipStart.ticks) >= insertionTicks) {
+                        shiftActions.push(clip.createMoveAction(sourceDuration))
+                    }
+                }
+            }
+            const audioTrackCount = await sequence.getAudioTrackCount()
+            for (let i = 0; i < audioTrackCount; i++) {
+                const track = await sequence.getAudioTrack(i)
+                const clips = await track.getTrackItems(1, false)
+                for (const clip of clips) {
+                    const clipStart = await clip.getStartTime()
+                    if (BigInt(clipStart.ticks) >= insertionTicks) {
+                        shiftActions.push(clip.createMoveAction(sourceDuration))
+                    }
+                }
+            }
+        } else {
+            let track
+            if (options.isVideo) {
+                track = await sequence.getVideoTrack(options.trackIndex)
+            } else {
+                track = await sequence.getAudioTrack(options.trackIndex)
+            }
+            const clips = await track.getTrackItems(1, false)
+            for (const clip of clips) {
+                const clipStart = await clip.getStartTime()
+                if (BigInt(clipStart.ticks) >= insertionTicks) {
+                    shiftActions.push(clip.createMoveAction(sourceDuration))
+                }
+            }
+        }
+
+        execute(() => shiftActions, project, "Insert duplicate clip - shift")
+
+        // Phase 2: Place source media at the target position using overwrite
+        // This uses absolute positioning (unlike createCloneTrackItemAction)
+        execute(() => {
+            const overwriteAction = editor.createOverwriteItemAction(
+                sourceProjectItem, timeOffset, videoTrackIdx, audioTrackIdx
+            )
+            return [overwriteAction]
+        }, project, "Insert duplicate clip - place")
+
+        // Phase 3: Trim the inserted clip to match source's in/out and duration
+        // The overwrite inserted the FULL media - trim to source's portion
+        const endTicks = insertionTicks + BigInt(sourceDuration.ticks)
+        const endTime = await app.TickTime.createWithTicks(endTicks.toString())
+
+        let trimActions = []
+
+        // Trim video clip at insertion point
+        const vTrack = await sequence.getVideoTrack(videoTrackIdx)
+        const vClips = await vTrack.getTrackItems(1, false)
+        for (const clip of vClips) {
+            const clipStart = await clip.getStartTime()
+            if (BigInt(clipStart.ticks) === insertionTicks) {
+                trimActions.push(clip.createSetInPointAction(sourceInPoint))
+                trimActions.push(clip.createSetEndAction(endTime))
+                break
+            }
+        }
+
+        // Trim audio clip at insertion point
+        if (linked) {
+            const aTrack = await sequence.getAudioTrack(audioTrackIdx)
+            const aClips = await aTrack.getTrackItems(1, false)
+            for (const clip of aClips) {
+                const clipStart = await clip.getStartTime()
+                if (BigInt(clipStart.ticks) === insertionTicks) {
+                    trimActions.push(clip.createSetInPointAction(sourceInPoint))
+                    trimActions.push(clip.createSetEndAction(endTime))
+                    break
+                }
+            }
+        }
+
+        if (trimActions.length > 0) {
+            execute(() => trimActions, project, "Insert duplicate clip - trim")
+        }
+
+        return { message: "Clip duplicated (insert) successfully" }
+    }
+
+    // OVERWRITE MODE (insert=false)
+    if (linked) {
+        const linkedClip = await findLinkedClip(sequence, trackItem, options.isVideo, linkedTrackIndex)
+        if (linkedClip) {
+            execute(() => {
+                const action1 = editor.createCloneTrackItemAction(
+                    trackItem, timeOffset,
+                    options.videoTrackOffset || 0, options.audioTrackOffset || 0,
+                    options.isVideo, false
+                )
+                const action2 = editor.createCloneTrackItemAction(
+                    linkedClip, timeOffset,
+                    options.videoTrackOffset || 0, options.audioTrackOffset || 0,
+                    !options.isVideo, false
+                )
+                return [action1, action2]
+            }, project, "Duplicate linked clips")
+            return { message: "Linked clips duplicated successfully" }
+        }
+    }
+
     execute(() => {
         const action = editor.createCloneTrackItemAction(
-            trackItem,
-            timeOffset,
-            options.videoTrackOffset || 0,
-            options.audioTrackOffset || 0,
-            options.isVideo,
-            options.insert || false
+            trackItem, timeOffset,
+            options.videoTrackOffset || 0, options.audioTrackOffset || 0,
+            options.isVideo, false
         )
         return [action]
     }, project)
@@ -1425,6 +1668,21 @@ const moveClip = async (command) => {
     }
 
     const moveTime = await app.TickTime.createWithTicks(options.moveTimeTicks.toString())
+
+    const linked = options.linked || false
+    const linkedTrackIndex = options.linkedTrackIndex !== undefined ? options.linkedTrackIndex : 0
+
+    if (linked) {
+        const linkedClip = await findLinkedClip(sequence, trackItem, options.isVideo, linkedTrackIndex)
+        if (linkedClip) {
+            execute(() => {
+                const action1 = trackItem.createMoveAction(moveTime)
+                const action2 = linkedClip.createMoveAction(moveTime)
+                return [action1, action2]
+            }, project, "Move linked clips")
+            return { message: "Linked clips moved successfully" }
+        }
+    }
 
     execute(() => {
         const action = trackItem.createMoveAction(moveTime)
@@ -1453,6 +1711,21 @@ const setClipPosition = async (command) => {
     }
 
     const newStart = await app.TickTime.createWithTicks(options.newStartTicks.toString())
+
+    const linked = options.linked || false
+    const linkedTrackIndex = options.linkedTrackIndex !== undefined ? options.linkedTrackIndex : 0
+
+    if (linked) {
+        const linkedClip = await findLinkedClip(sequence, trackItem, options.isVideo, linkedTrackIndex)
+        if (linkedClip) {
+            execute(() => {
+                const action1 = trackItem.createSetStartAction(newStart)
+                const action2 = linkedClip.createSetStartAction(newStart)
+                return [action1, action2]
+            }, project, "Set linked clips position")
+            return { message: "Linked clips position set successfully" }
+        }
+    }
 
     execute(() => {
         const action = trackItem.createSetStartAction(newStart)

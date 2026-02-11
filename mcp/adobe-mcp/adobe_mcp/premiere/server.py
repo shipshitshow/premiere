@@ -28,8 +28,11 @@ import subprocess
 import time
 
 
-def send_keystroke_to_premiere(key: str, modifiers: list = None):
-    """Send a keystroke to Premiere Pro using AppleScript."""
+def send_keystroke_to_premiere(key: str, modifiers: list = None, retries: int = 2):
+    """Send a keystroke to Premiere Pro using AppleScript.
+
+    Includes retry logic for -1712 timeout errors.
+    """
     if modifiers is None:
         modifiers = []
 
@@ -47,20 +50,33 @@ def send_keystroke_to_premiere(key: str, modifiers: list = None):
     end tell
     '''
 
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True,
-        text=True
-    )
+    last_error = None
+    for attempt in range(retries + 1):
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
 
-    if result.returncode != 0:
-        raise Exception(f"AppleScript error: {result.stderr}")
+        if result.returncode == 0:
+            return True
 
-    return True
+        last_error = result.stderr
+        # Retry on -1712 timeout errors
+        if "-1712" in result.stderr and attempt < retries:
+            time.sleep(0.3 * (attempt + 1))
+            continue
+        break
+
+    raise Exception(f"AppleScript error: {last_error}")
 
 
-def send_key_code_to_premiere(key_code: int, modifiers: list = None):
-    """Send a key code to Premiere Pro using AppleScript (for special keys)."""
+def send_key_code_to_premiere(key_code: int, modifiers: list = None, retries: int = 2):
+    """Send a key code to Premiere Pro using AppleScript (for special keys).
+
+    Includes retry logic for -1712 timeout errors.
+    """
     if modifiers is None:
         modifiers = []
 
@@ -77,15 +93,88 @@ def send_key_code_to_premiere(key_code: int, modifiers: list = None):
     end tell
     '''
 
+    last_error = None
+    for attempt in range(retries + 1):
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            return True
+
+        last_error = result.stderr
+        if "-1712" in result.stderr and attempt < retries:
+            time.sleep(0.3 * (attempt + 1))
+            continue
+        break
+
+    raise Exception(f"AppleScript error: {last_error}")
+
+
+def _ensure_premiere_focused():
+    """Activate Premiere Pro once before a batch operation."""
+    script = 'tell application "Adobe Premiere Pro 2026" to activate'
+    subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=10
+    )
+    time.sleep(0.15)
+
+
+def _send_keystroke_fast(key: str, modifiers: list = None):
+    """Send keystroke WITHOUT activate or delay — use after _ensure_premiere_focused()."""
+    if modifiers is None:
+        modifiers = []
+
+    if modifiers:
+        modifier_str = " using {" + ", ".join(f"{m} down" for m in modifiers) + "}"
+    else:
+        modifier_str = ""
+
+    script = f'''tell application "System Events"
+    keystroke "{key}"{modifier_str}
+end tell'''
+
     result = subprocess.run(
         ["osascript", "-e", script],
         capture_output=True,
-        text=True
+        text=True,
+        timeout=10
     )
 
     if result.returncode != 0:
         raise Exception(f"AppleScript error: {result.stderr}")
+    return True
 
+
+def _send_key_code_fast(key_code: int, modifiers: list = None):
+    """Send key code WITHOUT activate or delay — use after _ensure_premiere_focused()."""
+    if modifiers is None:
+        modifiers = []
+
+    if modifiers:
+        modifier_str = " using {" + ", ".join(f"{m} down" for m in modifiers) + "}"
+    else:
+        modifier_str = ""
+
+    script = f'''tell application "System Events"
+    key code {key_code}{modifier_str}
+end tell'''
+
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=10
+    )
+
+    if result.returncode != 0:
+        raise Exception(f"AppleScript error: {result.stderr}")
     return True
 
 
@@ -101,7 +190,7 @@ print(f"{mcp_name} running on stdio", file=sys.stderr)
 
 APPLICATION = "premiere"
 PROXY_URL = os.environ.get('PROXY_URL', 'http://localhost:3001')
-PROXY_TIMEOUT = int(os.environ.get('PROXY_TIMEOUT', '20'))
+PROXY_TIMEOUT = int(os.environ.get('PROXY_TIMEOUT', '120'))
 
 socket_client.configure(
     app=APPLICATION,
@@ -793,9 +882,11 @@ def batch_split_clips(sequence_id: str, split_times_seconds: list,
 @mcp.tool()
 def trim_video_clip(sequence_id: str, video_track_index: int, track_item_index: int,
                     new_start_seconds: float = None, new_end_seconds: float = None,
-                    new_in_point_seconds: float = None, new_out_point_seconds: float = None):
+                    new_in_point_seconds: float = None, new_out_point_seconds: float = None,
+                    linked: bool = True, audio_track_index: int = 0):
     """
     Trims a video clip by adjusting its start/end times or in/out points.
+    By default, also trims the linked audio counterpart.
 
     - Start/End times: Position on the timeline (sequence time)
     - In/Out points: Which part of the source media is used
@@ -808,6 +899,8 @@ def trim_video_clip(sequence_id: str, video_track_index: int, track_item_index: 
         new_end_seconds (float, optional): New end position on timeline in seconds.
         new_in_point_seconds (float, optional): New in-point in source media in seconds.
         new_out_point_seconds (float, optional): New out-point in source media in seconds.
+        linked (bool, optional): If True, also trim the linked audio counterpart. Defaults to True.
+        audio_track_index (int, optional): The index of the linked counterpart track. Defaults to 0.
     """
     TICKS_PER_SECOND = 254016000000
 
@@ -815,6 +908,8 @@ def trim_video_clip(sequence_id: str, video_track_index: int, track_item_index: 
         "sequenceId": sequence_id,
         "videoTrackIndex": video_track_index,
         "trackItemIndex": track_item_index,
+        "linked": linked,
+        "linkedTrackIndex": audio_track_index,
     }
 
     if new_start_seconds is not None:
@@ -833,9 +928,11 @@ def trim_video_clip(sequence_id: str, video_track_index: int, track_item_index: 
 @mcp.tool()
 def trim_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: int,
                     new_start_seconds: float = None, new_end_seconds: float = None,
-                    new_in_point_seconds: float = None, new_out_point_seconds: float = None):
+                    new_in_point_seconds: float = None, new_out_point_seconds: float = None,
+                    linked: bool = True, linked_video_track_index: int = 0):
     """
     Trims an audio clip by adjusting its start/end times or in/out points.
+    By default, also trims the linked video counterpart.
 
     Args:
         sequence_id (str): The id of the sequence containing the clip.
@@ -845,6 +942,8 @@ def trim_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: 
         new_end_seconds (float, optional): New end position on timeline in seconds.
         new_in_point_seconds (float, optional): New in-point in source media in seconds.
         new_out_point_seconds (float, optional): New out-point in source media in seconds.
+        linked (bool, optional): If True, also trim the linked video counterpart. Defaults to True.
+        linked_video_track_index (int, optional): The index of the linked counterpart track. Defaults to 0.
     """
     TICKS_PER_SECOND = 254016000000
 
@@ -852,6 +951,8 @@ def trim_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: 
         "sequenceId": sequence_id,
         "audioTrackIndex": audio_track_index,
         "trackItemIndex": track_item_index,
+        "linked": linked,
+        "linkedTrackIndex": linked_video_track_index,
     }
 
     if new_start_seconds is not None:
@@ -997,9 +1098,10 @@ def remove_marker(sequence_id: str, marker_index: int):
 
 
 @mcp.tool()
-def remove_clips(sequence_id: str, video_items: list = None, audio_items: list = None, ripple: bool = False):
+def remove_clips(sequence_id: str, video_items: list = None, audio_items: list = None, ripple: bool = False,
+                 linked: bool = True, audio_track_index: int = 0):
     """
-    Removes clips from the timeline.
+    Removes clips from the timeline. By default, also removes linked audio/video counterparts.
 
     Args:
         sequence_id (str): The id of the sequence.
@@ -1008,12 +1110,16 @@ def remove_clips(sequence_id: str, video_items: list = None, audio_items: list =
             Example: [{"trackIndex": 0, "clipIndex": 0}, {"trackIndex": 0, "clipIndex": 1}]
         audio_items (list, optional): List of audio clips to remove. Same format as video_items.
         ripple (bool, optional): If True, close the gap after removing clips. Defaults to False.
+        linked (bool, optional): If True, also remove the linked audio/video counterparts. Defaults to True.
+        audio_track_index (int, optional): The index of the linked counterpart track. Defaults to 0.
     """
     command = createCommand("removeClips", {
         "sequenceId": sequence_id,
         "videoItems": video_items or [],
         "audioItems": audio_items or [],
-        "ripple": ripple
+        "ripple": ripple,
+        "linked": linked,
+        "linkedTrackIndex": audio_track_index
     })
     return sendCommand(command)
 
@@ -1021,9 +1127,9 @@ def remove_clips(sequence_id: str, video_items: list = None, audio_items: list =
 @mcp.tool()
 def duplicate_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool,
                    time_offset_seconds: float, video_track_offset: int = 0, audio_track_offset: int = 0,
-                   insert: bool = False):
+                   insert: bool = False, linked: bool = True, audio_track_index: int = 0):
     """
-    Duplicates a clip on the timeline.
+    Duplicates a clip on the timeline. By default, also duplicates the linked audio/video counterpart.
 
     Args:
         sequence_id (str): The id of the sequence.
@@ -1034,6 +1140,8 @@ def duplicate_clip(sequence_id: str, track_index: int, clip_index: int, is_video
         video_track_offset (int, optional): Number of tracks to offset for video. Defaults to 0.
         audio_track_offset (int, optional): Number of tracks to offset for audio. Defaults to 0.
         insert (bool, optional): If True, insert and shift other clips. Defaults to False (overwrite).
+        linked (bool, optional): If True, also duplicate the linked audio/video counterpart. Defaults to True.
+        audio_track_index (int, optional): The index of the linked counterpart track. Defaults to 0.
     """
     TICKS_PER_SECOND = 254016000000
 
@@ -1045,15 +1153,18 @@ def duplicate_clip(sequence_id: str, track_index: int, clip_index: int, is_video
         "timeOffsetTicks": int(time_offset_seconds * TICKS_PER_SECOND),
         "videoTrackOffset": video_track_offset,
         "audioTrackOffset": audio_track_offset,
-        "insert": insert
+        "insert": insert,
+        "linked": linked,
+        "linkedTrackIndex": audio_track_index
     })
     return sendCommand(command)
 
 
 @mcp.tool()
-def move_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool, move_time_seconds: float):
+def move_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool, move_time_seconds: float,
+              linked: bool = True, audio_track_index: int = 0):
     """
-    Moves a clip by a time offset on the timeline (relative move).
+    Moves a clip by a time offset on the timeline (relative move). By default, also moves the linked audio/video counterpart.
 
     Args:
         sequence_id (str): The id of the sequence.
@@ -1061,6 +1172,8 @@ def move_clip(sequence_id: str, track_index: int, clip_index: int, is_video: boo
         clip_index (int): The index of the clip to move.
         is_video (bool): True if moving a video clip, False for audio.
         move_time_seconds (float): Time offset in seconds (positive = right, negative = left).
+        linked (bool, optional): If True, also move the linked audio/video counterpart. Defaults to True.
+        audio_track_index (int, optional): The index of the linked counterpart track. Defaults to 0.
     """
     TICKS_PER_SECOND = 254016000000
 
@@ -1069,15 +1182,18 @@ def move_clip(sequence_id: str, track_index: int, clip_index: int, is_video: boo
         "trackIndex": track_index,
         "clipIndex": clip_index,
         "isVideo": is_video,
-        "moveTimeTicks": int(move_time_seconds * TICKS_PER_SECOND)
+        "moveTimeTicks": int(move_time_seconds * TICKS_PER_SECOND),
+        "linked": linked,
+        "linkedTrackIndex": audio_track_index
     })
     return sendCommand(command)
 
 
 @mcp.tool()
-def set_clip_position(sequence_id: str, track_index: int, clip_index: int, is_video: bool, new_start_seconds: float):
+def set_clip_position(sequence_id: str, track_index: int, clip_index: int, is_video: bool, new_start_seconds: float,
+                      linked: bool = True, audio_track_index: int = 0):
     """
-    Moves a clip to an absolute position on the timeline.
+    Moves a clip to an absolute position on the timeline. By default, also moves the linked audio/video counterpart.
 
     Args:
         sequence_id (str): The id of the sequence.
@@ -1085,6 +1201,8 @@ def set_clip_position(sequence_id: str, track_index: int, clip_index: int, is_vi
         clip_index (int): The index of the clip to move.
         is_video (bool): True if moving a video clip, False for audio.
         new_start_seconds (float): The new start position in seconds (absolute, from sequence start).
+        linked (bool, optional): If True, also move the linked audio/video counterpart. Defaults to True.
+        audio_track_index (int, optional): The index of the linked counterpart track. Defaults to 0.
     """
     TICKS_PER_SECOND = 254016000000
 
@@ -1093,7 +1211,9 @@ def set_clip_position(sequence_id: str, track_index: int, clip_index: int, is_vi
         "trackIndex": track_index,
         "clipIndex": clip_index,
         "isVideo": is_video,
-        "newStartTicks": int(new_start_seconds * TICKS_PER_SECOND)
+        "newStartTicks": int(new_start_seconds * TICKS_PER_SECOND),
+        "linked": linked,
+        "linkedTrackIndex": audio_track_index
     })
     return sendCommand(command)
 
@@ -1138,27 +1258,21 @@ def rename_clip(sequence_id: str, track_index: int, clip_index: int, is_video: b
 
 
 @mcp.tool()
-def delete_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool):
+def delete_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool,
+                linked: bool = True, audio_track_index: int = 0):
     """
-    Delete a specific clip WITHOUT affecting other tracks.
+    Delete a specific clip. By default, also deletes the linked audio/video counterpart.
 
-    This is a convenience wrapper around remove_clips that deletes a single clip
-    without rippling (leaves a gap where the clip was). Use this when you want to
-    remove clips from specific tracks without shifting content on other tracks.
-
-    For track-specific editing workflows:
-    1. Use get_clip_info() to get clip details
-    2. Use delete_clip() to remove unwanted clips (leaves gaps)
-    3. Use set_clip_position() to move remaining clips into position
-
-    Alternative: Use set_video_clip_disabled() or set_audio_clip_disabled() to
-    disable clips instead of deleting them (non-destructive, can be re-enabled).
+    Leaves a gap where the clip was (no ripple). Use this when you want to
+    remove clips without shifting content on other tracks.
 
     Args:
         sequence_id (str): The id of the sequence.
         track_index (int): The index of the track containing the clip.
         clip_index (int): The index of the clip to delete.
         is_video (bool): True if deleting a video clip, False for audio.
+        linked (bool, optional): If True, also delete the linked audio/video counterpart. Defaults to True.
+        audio_track_index (int, optional): The index of the linked counterpart track. Defaults to 0.
 
     Returns:
         Dict with success message.
@@ -1174,7 +1288,9 @@ def delete_clip(sequence_id: str, track_index: int, clip_index: int, is_video: b
         "sequenceId": sequence_id,
         "videoItems": video_items,
         "audioItems": audio_items,
-        "ripple": False  # Never ripple - this is the key difference
+        "ripple": False,
+        "linked": linked,
+        "linkedTrackIndex": audio_track_index
     })
     return sendCommand(command)
 
@@ -1372,10 +1488,11 @@ def remove_silence_segments(sequence_id: str, silence_segments: list):
 
     This is the PREFERRED method for removing silence or unwanted sections.
     For each segment, it:
-    1. Cuts at the START of the silence
-    2. Cuts at the END of the silence
-    3. Moves playhead INTO the silence segment
-    4. Ripple deletes (Cmd+E) to remove and close gap
+    1. Sets sequence in/out points around the silence range (via API)
+    2. Extracts (ripple deletes) the marked range (';' key)
+
+    Uses fast AppleScript path — activates Premiere once, then sends
+    keystrokes without re-activating for each segment.
 
     Args:
         sequence_id (str): The id of the sequence.
@@ -1391,55 +1508,52 @@ def remove_silence_segments(sequence_id: str, silence_segments: list):
     # Sort segments by start time in descending order (process from end to start)
     sorted_segments = sorted(silence_segments, key=lambda x: x["start"], reverse=True)
 
+    # Activate Premiere once before the batch
+    _ensure_premiere_focused()
+
+    succeeded = 0
+    failed = 0
     results = []
     for seg in sorted_segments:
-        try:
-            start = seg["start"]
-            end = seg["end"]
-            middle = (start + end) / 2  # Middle of the segment
+        start = seg.get("start")
+        end = seg.get("end")
+        seg_ok = False
 
-            # Step 1: Cut at END of silence
-            position_ticks = int(end * TICKS_PER_SECOND)
-            command = createCommand("setPlayerPosition", {
-                "sequenceId": sequence_id,
-                "positionTicks": position_ticks
-            })
-            sendCommand(command)
-            time.sleep(0.1)
-            send_keystroke_to_premiere("d", ["command"])  # Cmd+D to cut
-            time.sleep(0.1)
+        for attempt in range(3):  # up to 2 retries
+            try:
+                # Step 1: Set in/out points around the silence segment via API
+                in_ticks = int(start * TICKS_PER_SECOND)
+                out_ticks = int(end * TICKS_PER_SECOND)
+                command = createCommand("setSequenceInOutPoints", {
+                    "sequenceId": sequence_id,
+                    "inPointTicks": in_ticks,
+                    "outPointTicks": out_ticks
+                })
+                sendCommand(command)
+                time.sleep(0.02)
 
-            # Step 2: Cut at START of silence
-            position_ticks = int(start * TICKS_PER_SECOND)
-            command = createCommand("setPlayerPosition", {
-                "sequenceId": sequence_id,
-                "positionTicks": position_ticks
-            })
-            sendCommand(command)
-            time.sleep(0.1)
-            send_keystroke_to_premiere("d", ["command"])  # Cmd+D to cut
-            time.sleep(0.1)
+                # Step 2: Extract (ripple delete marked range) — ';' key (fast path)
+                _send_keystroke_fast(";", [])
+                time.sleep(0.03)
 
-            # Step 3: Move playhead INTO the silence segment (middle)
-            position_ticks = int(middle * TICKS_PER_SECOND)
-            command = createCommand("setPlayerPosition", {
-                "sequenceId": sequence_id,
-                "positionTicks": position_ticks
-            })
-            sendCommand(command)
-            time.sleep(0.1)
-
-            # Step 4: Ripple delete (Cmd+E)
-            send_keystroke_to_premiere("e", ["command"])
-            time.sleep(0.15)
-
-            results.append({"start": start, "end": end, "success": True})
-        except Exception as e:
-            results.append({"start": seg.get("start"), "end": seg.get("end"), "success": False, "error": str(e)})
+                results.append({"start": start, "end": end, "success": True})
+                succeeded += 1
+                seg_ok = True
+                break
+            except Exception as e:
+                if attempt < 2:
+                    # Re-focus Premiere and retry with backoff
+                    _ensure_premiere_focused()
+                    time.sleep(0.2 * (attempt + 1))
+                else:
+                    results.append({"start": start, "end": end, "success": False, "error": str(e)})
+                    failed += 1
 
     return {
         "action": "remove_silence_segments",
         "processed": len(sorted_segments),
+        "succeeded": succeeded,
+        "failed": failed,
         "results": results
     }
 

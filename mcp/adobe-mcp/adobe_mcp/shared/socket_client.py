@@ -32,134 +32,203 @@ proxy_url = None
 proxy_timeout = None
 application = None
 
-def send_message_blocking(command, timeout=None):
-    """
-    Blocking function that connects to a Socket.IO server, sends a message,
-    waits for a response, then disconnects.
-    
-    Args:
-        command: The command to send
-        timeout (int): Maximum time to wait for response in seconds
-        
-    Returns:
-        dict: The response received from the server, or None if no response
-    """
-    # Use global variables
-    global application, proxy_url, proxy_timeout
-    
-    # Check if configuration is set
-    if not application or not proxy_url or not proxy_timeout:
-        logger.log("Socket client not configured. Call configure() first.")
-        return None
-    
-    # Use provided timeout or default
-    wait_timeout = timeout if timeout is not None else proxy_timeout
-    
-    # Create a standard (non-async) SocketIO client with WebSocket transport only
-    sio = socketio.Client(logger=False)
-    
-    # Use a queue to get the response from the event handler
-    response_queue = Queue()
-    
-    connection_failed = [False]         
+# Singleton persistent client
+_client = None
+_client_lock = threading.Lock()
 
-    @sio.event
-    def connect():
-        logger.log(f"Connected to server with session ID: {sio.sid}")
-        
-        # Send the command
-        logger.log(f"Sending message to {application}: {command}")
-        sio.emit('command_packet', {
-            'type': "command",
-            'application': application,
-            'command': command
-        })
-    
-    @sio.event
-    def packet_response(data):
-        logger.log(f"Received response: {data}")
-        response_queue.put(data)
-        # Disconnect after receiving the response
-        sio.disconnect()
-    
-    @sio.event
-    def disconnect():
-        logger.log("Disconnected from server")
-        # If we disconnect without response, put None in the queue
-        if response_queue.empty():
-            response_queue.put(None)
-    
-    @sio.event
-    def connect_error(error):
-        logger.log(f"Connection error: {error}")
-        connection_failed[0] = True
-        response_queue.put(None)
-    
-    # Connect in a separate thread to avoid blocking the main thread during connection
-    def connect_and_wait():
-        try:
-            sio.connect(proxy_url, transports=['websocket'])
-            # Keep the client running until disconnect is called
-            sio.wait()
-        except Exception as e:
-            logger.log(f"Error: {e}")
-            connection_failed[0] = True
-            if response_queue.empty():
-                response_queue.put(None)
-            if sio.connected:
-                sio.disconnect()
-    
-    # Start the client in a separate thread
-    client_thread = threading.Thread(target=connect_and_wait)
-    client_thread.daemon = True
-    client_thread.start()
-    
-    try:
-        # Wait for a response or timeout
-        logger.log("waiting for response...")
-        response = response_queue.get(timeout=wait_timeout)
-
-        if connection_failed[0]:
-            raise RuntimeError(f"Error: Could not connect to {application} command proxy server. Make sure that the proxy server is running listening on the correct url {proxy_url}.")
-
-        if response:
-            logger.log("response received...")
-            try:
-                logger.log(json.dumps(response))
-            except:
-                logger.log(f"Response (not JSON-serializable): {response}")
-
-            if response["status"] == "FAILURE":
-                raise AppError(f"Error returned from {application}: {response['message']}")
-            
-        return response
-    except AppError:
-        raise
-    except Exception as e:
-        logger.log(f"Error waiting for response: {e}")
-        if sio.connected:
-            sio.disconnect()
-  
-        raise RuntimeError(f"Error: Could not connect to {application}. Connection Timed Out. Make sure that {application} is running and that the MCP Plugin is connected. Original error: {e}")
-    finally:
-        # Make sure client is disconnected
-        if sio.connected:
-            sio.disconnect()
-        # Wait for the thread to finish (should be quick after disconnect)
-        client_thread.join(timeout=1)
 
 class AppError(Exception):
     pass
 
+
+class PersistentSocketClient:
+    """Persistent Socket.IO client that connects once and reuses the connection."""
+
+    def __init__(self, url, app):
+        self._url = url
+        self._app = app
+        self._sio = socketio.Client(
+            logger=False,
+            reconnection=True,
+            reconnection_attempts=0,  # unlimited
+            reconnection_delay=0.5,
+            reconnection_delay_max=5,
+        )
+        self._send_lock = threading.Lock()
+        self._connected = threading.Event()
+        self._response_queues = {}  # keyed by socket session id isn't needed; we serialize sends
+        self._current_queue = None
+        self._bg_thread = None
+
+        self._setup_handlers()
+
+    def _setup_handlers(self):
+        @self._sio.event
+        def connect():
+            logger.log(f"[Persistent] Connected with session ID: {self._sio.sid}")
+            self._connected.set()
+
+        @self._sio.event
+        def packet_response(data):
+            logger.log(f"[Persistent] Received response: {data}")
+            q = self._current_queue
+            if q is not None:
+                q.put(data)
+
+        @self._sio.event
+        def disconnect():
+            logger.log("[Persistent] Disconnected from server")
+            self._connected.clear()
+            # Unblock any waiting sender
+            q = self._current_queue
+            if q is not None and q.empty():
+                q.put(None)
+
+        @self._sio.event
+        def connect_error(error):
+            logger.log(f"[Persistent] Connection error: {error}")
+            self._connected.clear()
+
+    def _ensure_connected(self, timeout=10):
+        """Connect if not already connected. Returns True if connected."""
+        if self._sio.connected:
+            return True
+
+        logger.log(f"[Persistent] Connecting to {self._url}...")
+
+        def _run():
+            try:
+                self._sio.connect(self._url, transports=['websocket'])
+                self._sio.wait()
+            except Exception as e:
+                logger.log(f"[Persistent] Background thread error: {e}")
+                self._connected.clear()
+
+        if self._bg_thread is None or not self._bg_thread.is_alive():
+            self._bg_thread = threading.Thread(target=_run, daemon=True)
+            self._bg_thread.start()
+
+        if not self._connected.wait(timeout=timeout):
+            raise RuntimeError(
+                f"Error: Could not connect to {self._app} command proxy server. "
+                f"Make sure that the proxy server is running listening on the correct url {self._url}."
+            )
+        return True
+
+    def send(self, command, timeout=None):
+        """Send a command and wait for a response. Thread-safe via _send_lock."""
+        wait_timeout = timeout if timeout is not None else proxy_timeout or 120
+
+        with self._send_lock:
+            self._ensure_connected()
+
+            q = Queue()
+            self._current_queue = q
+
+            try:
+                logger.log(f"[Persistent] Sending to {self._app}: {command}")
+                self._sio.emit('command_packet', {
+                    'type': "command",
+                    'application': self._app,
+                    'command': command
+                })
+
+                response = q.get(timeout=wait_timeout)
+
+                if response is None:
+                    raise RuntimeError(
+                        f"Error: No response from {self._app}. Connection may have dropped."
+                    )
+
+                try:
+                    logger.log(json.dumps(response))
+                except Exception:
+                    logger.log(f"Response (not JSON-serializable): {response}")
+
+                if response.get("status") == "FAILURE":
+                    raise AppError(f"Error returned from {self._app}: {response['message']}")
+
+                return response
+
+            except AppError:
+                raise
+            except Exception as e:
+                logger.log(f"[Persistent] Error waiting for response: {e}")
+                # Force reconnect on next call
+                try:
+                    if self._sio.connected:
+                        self._sio.disconnect()
+                except Exception:
+                    pass
+                self._connected.clear()
+                raise RuntimeError(
+                    f"Error: Could not connect to {self._app}. Connection Timed Out. "
+                    f"Make sure that {self._app} is running and that the MCP Plugin is connected. "
+                    f"Original error: {e}"
+                )
+            finally:
+                self._current_queue = None
+
+    def disconnect(self):
+        """Explicitly disconnect the persistent client."""
+        try:
+            if self._sio.connected:
+                self._sio.disconnect()
+        except Exception:
+            pass
+        self._connected.clear()
+
+
+def _get_client():
+    """Get or create the singleton persistent client."""
+    global _client
+    if _client is not None:
+        return _client
+
+    with _client_lock:
+        if _client is not None:
+            return _client
+
+        if not application or not proxy_url:
+            raise RuntimeError("Socket client not configured. Call configure() first.")
+
+        _client = PersistentSocketClient(proxy_url, application)
+        return _client
+
+
+def send_message_blocking(command, timeout=None):
+    """
+    Blocking function that sends a message via the persistent connection,
+    waits for a response, then returns it.
+
+    Args:
+        command: The command to send
+        timeout (int): Maximum time to wait for response in seconds
+
+    Returns:
+        dict: The response received from the server, or None if no response
+    """
+    if not application or not proxy_url or not proxy_timeout:
+        logger.log("Socket client not configured. Call configure() first.")
+        return None
+
+    client = _get_client()
+    return client.send(command, timeout=timeout)
+
+
 def configure(app=None, url=None, timeout=None):
-    
-    global application, proxy_url, proxy_timeout
-    
+    global application, proxy_url, proxy_timeout, _client
+
     if app:
         application = app
     if url:
         proxy_url = url
     if timeout:
         proxy_timeout = timeout
-    
+
+    # Reset singleton if config changes so next call reconnects with new settings
+    if _client is not None:
+        _client.disconnect()
+        _client = None
+
     logger.log(f"Socket client configured: app={application}, url={proxy_url}, timeout={proxy_timeout}")

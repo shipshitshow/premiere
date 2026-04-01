@@ -998,6 +998,38 @@ def remove_video_clip_range(sequence_id: str, video_track_index: int, track_item
     return sendCommand(command)
 
 @mcp.tool()
+def remove_linked_clip_range(sequence_id: str, track_item_index: int,
+                             range_start_seconds: float, range_end_seconds: float,
+                             video_track_index: int = 0, audio_track_index: int = 0):
+    """
+    Removes a section from BOTH video and audio clips together, keeping content before and after.
+
+    This handles linked video+audio clips in a single operation. The clips will be split
+    at the range boundaries, and the middle section will be removed with the second part
+    moved to connect with the first part. Both tracks stay in sync.
+
+    Args:
+        sequence_id (str): The id of the sequence containing the clip.
+        track_item_index (int): The index of the clip within the track.
+        range_start_seconds (float): Start of the range to remove (in sequence time).
+        range_end_seconds (float): End of the range to remove (in sequence time).
+        video_track_index (int): The index of the video track. Defaults to 0.
+        audio_track_index (int): The index of the audio track. Defaults to 0.
+    """
+    TICKS_PER_SECOND = 254016000000
+
+    command = createCommand("removeLinkedClipRange", {
+        "sequenceId": sequence_id,
+        "videoTrackIndex": video_track_index,
+        "audioTrackIndex": audio_track_index,
+        "trackItemIndex": track_item_index,
+        "rangeStartTicks": int(range_start_seconds * TICKS_PER_SECOND),
+        "rangeEndTicks": int(range_end_seconds * TICKS_PER_SECOND)
+    })
+
+    return sendCommand(command)
+
+@mcp.tool()
 def get_player_position(sequence_id: str):
     """
     Gets the current playhead/player position in the sequence.
@@ -1489,10 +1521,9 @@ def remove_silence_segments(sequence_id: str, silence_segments: list):
     This is the PREFERRED method for removing silence or unwanted sections.
     For each segment, it:
     1. Sets sequence in/out points around the silence range (via API)
-    2. Extracts (ripple deletes) the marked range (';' key)
+    2. Extracts (ripple deletes) the marked range (';' key via AppleScript)
 
-    Uses fast AppleScript path — activates Premiere once, then sends
-    keystrokes without re-activating for each segment.
+    Extracts both video AND audio together using Premiere's native Extract command.
 
     Args:
         sequence_id (str): The id of the sequence.
@@ -1508,9 +1539,6 @@ def remove_silence_segments(sequence_id: str, silence_segments: list):
     # Sort segments by start time in descending order (process from end to start)
     sorted_segments = sorted(silence_segments, key=lambda x: x["start"], reverse=True)
 
-    # Activate Premiere once before the batch
-    _ensure_premiere_focused()
-
     succeeded = 0
     failed = 0
     results = []
@@ -1521,7 +1549,7 @@ def remove_silence_segments(sequence_id: str, silence_segments: list):
 
         for attempt in range(3):  # up to 2 retries
             try:
-                # Step 1: Set in/out points around the silence segment via API
+                # Step 1: Set in/out points around the segment via API
                 in_ticks = int(start * TICKS_PER_SECOND)
                 out_ticks = int(end * TICKS_PER_SECOND)
                 command = createCommand("setSequenceInOutPoints", {
@@ -1530,11 +1558,12 @@ def remove_silence_segments(sequence_id: str, silence_segments: list):
                     "outPointTicks": out_ticks
                 })
                 sendCommand(command)
-                time.sleep(0.02)
+                time.sleep(0.5)
 
-                # Step 2: Extract (ripple delete marked range) — ';' key (fast path)
-                _send_keystroke_fast(";", [])
-                time.sleep(0.03)
+                # Step 2: Extract (ripple delete marked range)
+                # Use send_keystroke_to_premiere which activates Premiere first
+                send_keystroke_to_premiere(";")
+                time.sleep(1.5)
 
                 results.append({"start": start, "end": end, "success": True})
                 succeeded += 1
@@ -1542,9 +1571,7 @@ def remove_silence_segments(sequence_id: str, silence_segments: list):
                 break
             except Exception as e:
                 if attempt < 2:
-                    # Re-focus Premiere and retry with backoff
-                    _ensure_premiere_focused()
-                    time.sleep(0.2 * (attempt + 1))
+                    time.sleep(1.0 * (attempt + 1))
                 else:
                     results.append({"start": start, "end": end, "success": False, "error": str(e)})
                     failed += 1

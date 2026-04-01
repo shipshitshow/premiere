@@ -1270,6 +1270,115 @@ const removeVideoClipRange = async (command) => {
     }
 }
 
+const removeLinkedClipRange = async (command) => {
+    const options = command.options
+    const id = options.sequenceId
+
+    const project = await app.Project.getActiveProject()
+    const sequence = await _getSequenceFromId(id)
+
+    if (!sequence) {
+        throw new Error(`removeLinkedClipRange : Requires an active sequence.`)
+    }
+
+    const editor = await app.SequenceEditor.getEditor(sequence)
+    const videoTrackIndex = options.videoTrackIndex !== undefined ? options.videoTrackIndex : 0
+    const audioTrackIndex = options.audioTrackIndex !== undefined ? options.audioTrackIndex : 0
+    const trackItemIndex = options.trackItemIndex !== undefined ? options.trackItemIndex : 0
+
+    // Get both video and audio track items
+    const videoItem = await getVideoTrack(sequence, videoTrackIndex, trackItemIndex)
+    const audioItem = await getAudioTrack(sequence, audioTrackIndex, trackItemIndex)
+
+    const clipStart = await videoItem.getStartTime()
+    const clipEnd = await videoItem.getEndTime()
+    const videoInPoint = await videoItem.getInPoint()
+    const audioInPoint = await audioItem.getInPoint()
+
+    const rangeStartTicks = BigInt(options.rangeStartTicks)
+    const rangeEndTicks = BigInt(options.rangeEndTicks)
+
+    if (rangeStartTicks < BigInt(clipStart.ticks) || rangeEndTicks > BigInt(clipEnd.ticks)) {
+        throw new Error(`removeLinkedClipRange : Range must be within clip bounds`)
+    }
+
+    const rangeStart = await app.TickTime.createWithTicks(rangeStartTicks.toString())
+
+    // Calculate new in-points for the second parts
+    const offsetToRangeEnd = rangeEndTicks - BigInt(clipStart.ticks)
+    const newVideoInPointTicks = BigInt(videoInPoint.ticks) + offsetToRangeEnd
+    const newAudioInPointTicks = BigInt(audioInPoint.ticks) + offsetToRangeEnd
+    const newVideoInPoint = await app.TickTime.createWithTicks(newVideoInPointTicks.toString())
+    const newAudioInPoint = await app.TickTime.createWithTicks(newAudioInPointTicks.toString())
+
+    // Step 1: Clone both video and audio clips
+    execute(() => {
+        const cloneVideoAction = editor.createCloneTrackItemAction(
+            videoItem, rangeStart, 0, 0, true, false
+        )
+        const cloneAudioAction = editor.createCloneTrackItemAction(
+            audioItem, rangeStart, 0, 0, false, true
+        )
+        return [cloneVideoAction, cloneAudioAction]
+    }, project, "Clone clips for range removal")
+
+    // Step 2: Trim both originals to end at range start
+    execute(() => {
+        const trimVideoAction = videoItem.createSetEndAction(rangeStart)
+        const trimAudioAction = audioItem.createSetEndAction(rangeStart)
+        return [trimVideoAction, trimAudioAction]
+    }, project, "Trim originals")
+
+    // Step 3: Find and adjust cloned video clip
+    const videoTrack = await sequence.getVideoTrack(videoTrackIndex)
+    const videoItems = await videoTrack.getTrackItems(1, false)
+    let clonedVideoItem = null
+    for (const item of videoItems) {
+        const itemStart = await item.getStartTime()
+        if (BigInt(itemStart.ticks) >= rangeStartTicks && item !== videoItem) {
+            clonedVideoItem = item
+            break
+        }
+    }
+
+    // Step 4: Find and adjust cloned audio clip
+    const audioTrack = await sequence.getAudioTrack(audioTrackIndex)
+    const audioItems = await audioTrack.getTrackItems(1, false)
+    let clonedAudioItem = null
+    for (const item of audioItems) {
+        const itemStart = await item.getStartTime()
+        if (BigInt(itemStart.ticks) >= rangeStartTicks && item !== audioItem) {
+            clonedAudioItem = item
+            break
+        }
+    }
+
+    // Step 5: Adjust in-points and positions of cloned clips
+    const actions = []
+    if (clonedVideoItem) {
+        execute(() => {
+            return [
+                clonedVideoItem.createSetInPointAction(newVideoInPoint),
+                clonedVideoItem.createSetStartAction(rangeStart)
+            ]
+        }, project, "Adjust cloned video")
+    }
+    if (clonedAudioItem) {
+        execute(() => {
+            return [
+                clonedAudioItem.createSetInPointAction(newAudioInPoint),
+                clonedAudioItem.createSetStartAction(rangeStart)
+            ]
+        }, project, "Adjust cloned audio")
+    }
+
+    return {
+        message: "Linked range removed successfully",
+        rangeStart: options.rangeStartTicks,
+        rangeEnd: options.rangeEndTicks
+    }
+}
+
 const getPlayerPosition = async (command) => {
     const options = command.options
     const id = options.sequenceId
@@ -2591,6 +2700,7 @@ const commandHandlers = {
     trimVideoClip,
     trimAudioClip,
     removeVideoClipRange,
+    removeLinkedClipRange,
     getPlayerPosition,
     setPlayerPosition,
     addMarker,

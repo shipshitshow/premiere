@@ -25,6 +25,7 @@ wheels/
 venv/
 ENV/
 app/.venv/
+node_modules/
 
 # IDE
 .idea/
@@ -62,6 +63,14 @@ music/*.wav
 *.json
 !config/*.json
 !.claude/settings.json
+!.mcp.json
+!package.json
+!biome.json
+!bun.lock
+!bun.lockb
+!.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
 credentials.json
 client_secrets.json
 token.pickle
@@ -73,3 +82,4 @@ Thumbs.db
 # Logs
 *.log
 logs/
+.husky/_/

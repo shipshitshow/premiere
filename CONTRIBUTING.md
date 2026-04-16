@@ -11,6 +11,13 @@ Thank you for your interest in contributing to Premiere! This document provides 
 - [Submitting Changes](#submitting-changes)
 - [Release Process](#release-process)
 
+## Work Tracking
+
+- Use GitHub issues for bugs, features, and tracked work.
+- Do not create `.agents/TASKS` or `.agents/PRDS` entries for repo work.
+- If a change is small, clear, and can be implemented safely right away, implement it directly.
+- Use GitHub issues when the work needs discussion, tracking, prioritization, or a broader scope.
+
 ## Development Setup
 
 ### Prerequisites

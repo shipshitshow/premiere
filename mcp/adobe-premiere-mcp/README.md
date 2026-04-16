@@ -1,4 +1,6 @@
-# Adobe MCP - Unified MCP Server for Adobe Creative Suite
+# Adobe Premiere MCP Workspace
+
+This folder is named `adobe-premiere-mcp` in this repo because it is the Premiere-facing MCP workspace used by the editing workflow. The upstream package and repository names still use `adobe-mcp`.
 
 Adobe MCP provides AI-powered automation for Adobe Creative Suite applications (Photoshop, Premiere Pro, Illustrator, and InDesign) through the Model Context Protocol (MCP). This enables AI assistants like Claude to control Adobe applications programmatically using natural language.
 
@@ -32,8 +34,8 @@ The system uses a 3-tier architecture:
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/adobe-mcp.git
-cd adobe-mcp
+git clone https://github.com/yourusername/adobe-mcp.git adobe-premiere-mcp
+cd adobe-premiere-mcp
 ```
 
 2. Install Python dependencies:
@@ -123,7 +125,7 @@ Add to your Claude desktop configuration:
 ### Project Structure
 
 ```
-adobe-mcp/
+adobe-premiere-mcp/
 ├── adobe_mcp/           # Python MCP servers
 │   ├── photoshop/      # Photoshop MCP server
 │   ├── premiere/       # Premiere Pro MCP server

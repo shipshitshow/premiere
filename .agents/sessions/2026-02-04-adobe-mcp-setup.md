@@ -12,12 +12,12 @@ Set up Adobe Premiere MCP server + scripts to create two parallel editing versio
 
 ## What Was Accomplished
 
-### 1. Cloned and Installed adobe-mcp Repository
+### 1. Cloned and Installed adobe-premiere-mcp Workspace
 ```bash
 cd /Users/decod3rslabs/www/premiere/mcp
-rm -rf adobe-mcp
-git clone https://github.com/david-t-martel/adobe-mcp.git adobe-mcp
-cd adobe-mcp && pip3 install -e .
+rm -rf adobe-premiere-mcp
+git clone https://github.com/david-t-martel/adobe-mcp.git adobe-premiere-mcp
+cd adobe-premiere-mcp && pip3 install -e .
 ```
 - **Status:** ✅ Complete
 - Python package installed successfully
@@ -32,7 +32,7 @@ cd proxy-server && npm install
 
 ### 3. Created Bridge Modules
 
-#### `mcp/adobe-mcp/bridge.py`
+#### `mcp/adobe-premiere-mcp/bridge.py`
 Converts Python pipeline output to Premiere format:
 - `segments_to_premiere_cuts()` - Extract silence segments for cutting
 - `create_jsx_args()` - Format for apply-cuts.jsx
@@ -40,12 +40,12 @@ Converts Python pipeline output to Premiere format:
 - `get_segment_stats()` - Statistics about detected segments
 - `validate_segments()` - Validate segment data integrity
 
-#### `mcp/adobe-mcp/jsx_runner.py`
+#### `mcp/adobe-premiere-mcp/jsx_runner.py`
 Execute commands via the proxy server:
 - `JSXRunner` class for managing connections
 - Convenience functions: `import_media()`, `create_sequence()`, `create_project()`, `save_project()`
 
-#### `mcp/adobe-mcp/premiere_tools.py`
+#### `mcp/adobe-premiere-mcp/premiere_tools.py`
 High-level MCP tools:
 - `adobe_premiere_import_and_setup` - Create project + import + sequence
 - `adobe_premiere_apply_python_cuts` - Apply segments.json cuts
@@ -64,7 +64,7 @@ High-level MCP tools:
       "type": "stdio",
       "command": "python3",
       "args": ["-m", "server"],
-      "cwd": "./mcp/premiere-mcp"
+      "cwd": "./mcp/premiere-python-mcp"
     },
     "adobe-premiere": {
       "type": "stdio",
@@ -78,7 +78,7 @@ High-level MCP tools:
 ```
 
 ### 5. Created Documentation
-- `mcp/adobe-mcp/PREMIERE_PIPELINE_SETUP.md` - Full setup and usage guide
+- `mcp/adobe-premiere-mcp/PREMIERE_PIPELINE_SETUP.md` - Full setup and usage guide
 
 ---
 
@@ -133,7 +133,7 @@ Premiere Pro needs to be started AFTER UXP Developer Tools is already running fo
 4. Check Adobe forums for Premiere 2026 + UXP Developer Tools compatibility
 
 ### After Connection Established
-1. Load the plugin from `/Users/decod3rslabs/www/premiere/mcp/adobe-mcp/uxp-plugins/premiere/`
+1. Load the plugin from `/Users/decod3rslabs/www/premiere/mcp/adobe-premiere-mcp/uxp-plugins/premiere/`
 2. Verify plugin appears in Premiere's Window → Extensions menu
 3. Test basic MCP commands (create project, import media)
 4. Test full workflow with segments.json
@@ -143,17 +143,17 @@ Premiere Pro needs to be started AFTER UXP Developer Tools is already running fo
 ## Files Created/Modified This Session
 
 ### Created
-- `/Users/decod3rslabs/www/premiere/mcp/adobe-mcp/bridge.py`
-- `/Users/decod3rslabs/www/premiere/mcp/adobe-mcp/jsx_runner.py`
-- `/Users/decod3rslabs/www/premiere/mcp/adobe-mcp/premiere_tools.py`
-- `/Users/decod3rslabs/www/premiere/mcp/adobe-mcp/PREMIERE_PIPELINE_SETUP.md`
+- `/Users/decod3rslabs/www/premiere/mcp/adobe-premiere-mcp/bridge.py`
+- `/Users/decod3rslabs/www/premiere/mcp/adobe-premiere-mcp/jsx_runner.py`
+- `/Users/decod3rslabs/www/premiere/mcp/adobe-premiere-mcp/premiere_tools.py`
+- `/Users/decod3rslabs/www/premiere/mcp/adobe-premiere-mcp/PREMIERE_PIPELINE_SETUP.md`
 
 ### Modified
 - `/Users/decod3rslabs/www/premiere/.claude/settings.json`
-- `/Users/decod3rslabs/www/premiere/mcp/adobe-mcp/adobe_mcp/premiere/server.py`
+- `/Users/decod3rslabs/www/premiere/mcp/adobe-premiere-mcp/adobe_mcp/premiere/server.py`
 
 ### Cloned
-- `/Users/decod3rslabs/www/premiere/mcp/adobe-mcp/` (from github.com/david-t-martel/adobe-mcp)
+- `/Users/decod3rslabs/www/premiere/mcp/adobe-premiere-mcp/` (from github.com/david-t-martel/adobe-mcp)
 
 ---
 
@@ -199,7 +199,7 @@ Adobe Premiere Pro
 
 ```bash
 # Start proxy server
-cd /Users/decod3rslabs/www/premiere/mcp/adobe-mcp/proxy-server
+cd /Users/decod3rslabs/www/premiere/mcp/adobe-premiere-mcp/proxy-server
 node proxy.js
 
 # Check proxy is running

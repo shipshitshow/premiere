@@ -2,10 +2,10 @@
   "mcpServers": {
     "adobe-premiere": {
       "type": "stdio",
-      "command": "/Users/decod3rslabs/www/premiere/.venv/bin/adobe-premiere",
+      "command": "./.venv/bin/adobe-premiere",
       "timeout": 300,
       "env": {
-        "SCRIPTS_DIR": "/Users/decod3rslabs/www/premiere/scripts",
+        "SCRIPTS_DIR": "./scripts",
         "PROXY_URL": "http://localhost:3001",
         "PROXY_TIMEOUT": "120"
       }

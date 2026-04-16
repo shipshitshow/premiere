@@ -20,7 +20,7 @@ This guide will help you set up and test the Adobe MCP server on Windows.
 ### 1. Clone and Navigate to Repository
 
 ```bash
-cd adobe-mcp-unified
+cd adobe-premiere-mcp
 ```
 
 ### 2. Install Dependencies
@@ -129,11 +129,11 @@ Add to your Claude Desktop configuration (`%APPDATA%\Claude\claude_desktop_confi
 {
   "mcpServers": {
     "adobe-photoshop": {
-      "command": "C:\\path\\to\\adobe-mcp\\launch-windows.bat",
+      "command": "C:\\path\\to\\adobe-premiere-mcp\\launch-windows.bat",
       "args": ["photoshop"]
     },
     "adobe-illustrator": {
-      "command": "C:\\path\\to\\adobe-mcp\\launch-windows.bat",
+      "command": "C:\\path\\to\\adobe-premiere-mcp\\launch-windows.bat",
       "args": ["illustrator"]
     }
   }

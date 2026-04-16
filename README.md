@@ -20,10 +20,10 @@ premiere/
 │   └── README.md
 │
 ├── mcp/                          # MCP servers for Claude Code
-│   ├── premiere-mcp/             # Control Python app via MCP
+│   ├── premiere-python-mcp/      # Control Python app via MCP
 │   │   ├── server.py
 │   │   └── tools/
-│   └── adobe-mcp/                # Control Adobe Premiere Pro
+│   └── adobe-premiere-mcp/       # Control Adobe Premiere Pro
 │
 └── scripts/                      # ExtendScript for Adobe automation
     ├── import-media.jsx
@@ -82,10 +82,10 @@ premiere --version
 premiere info ~/Videos/test.mp4
 ```
 
-### 2. premiere-mcp (MCP Server)
+### 2. premiere-python-mcp (MCP Server)
 
 ```bash
-cd mcp/premiere-mcp
+cd mcp/premiere-python-mcp
 pip install -e .
 ```
 
@@ -98,15 +98,15 @@ Add to Claude Code settings (`~/.claude/settings.json`):
       "type": "stdio",
       "command": "python",
       "args": ["-m", "server"],
-      "cwd": "~/www/VincentShipsIt/premiere/mcp/premiere-mcp"
+      "cwd": "~/www/VincentShipsIt/premiere/mcp/premiere-python-mcp"
     }
   }
 }
 ```
 
-### 3. adobe-mcp (Optional)
+### 3. adobe-premiere-mcp (Optional)
 
-See [mcp/adobe-mcp/README.md](mcp/adobe-mcp/README.md) for setup instructions.
+See [mcp/adobe-premiere-mcp/README.md](mcp/adobe-premiere-mcp/README.md) for setup instructions.
 
 ## MCP Tools
 
@@ -139,7 +139,7 @@ See [mcp/adobe-mcp/README.md](mcp/adobe-mcp/README.md) for setup instructions.
 
 ## ExtendScripts
 
-Scripts in `scripts/` can be called by adobe-mcp or run directly in Premiere:
+Scripts in `scripts/` can be called by `adobe-premiere-mcp` or run directly in Premiere:
 
 - **import-media.jsx** - Import files into project bins
 - **create-sequence.jsx** - Create sequences from presets
@@ -182,4 +182,4 @@ premiere process video.mp4 --clips --max-clips 5
 - FFmpeg
 - OpenAI Whisper (for transcription)
 - yt-dlp (for downloads)
-- Adobe Premiere Pro (for adobe-mcp workflow)
+- Adobe Premiere Pro (for `adobe-premiere-mcp` workflow)

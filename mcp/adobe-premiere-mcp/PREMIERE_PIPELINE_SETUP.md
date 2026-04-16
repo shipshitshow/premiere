@@ -29,13 +29,13 @@ premiere_cut_silence              adobe_premiere_full_workflow
 
 ## Installation Steps
 
-### Step 1: Clone and Install adobe-mcp
+### Step 1: Clone and Install adobe-premiere-mcp
 
 ```bash
 cd /Users/decod3rslabs/www/premiere/mcp
-rm -rf adobe-mcp
-git clone https://github.com/david-t-martel/adobe-mcp.git adobe-mcp
-cd adobe-mcp
+rm -rf adobe-premiere-mcp
+git clone https://github.com/david-t-martel/adobe-mcp.git adobe-premiere-mcp
+cd adobe-premiere-mcp
 pip3 install -e .
 ```
 
@@ -51,7 +51,7 @@ cd ..
 
 1. Open **Adobe UXP Developer Tools** (install from Creative Cloud if needed)
 2. Click **"Add Plugin"**
-3. Navigate to `mcp/adobe-mcp/uxp-plugins/premiere/`
+3. Navigate to `mcp/adobe-premiere-mcp/uxp-plugins/premiere/`
 4. Select `manifest.json`
 5. Click **"Load"** to activate the plugin
 6. Open **Premiere Pro** - the plugin should connect automatically
@@ -60,7 +60,7 @@ cd ..
 
 1. Start the proxy server:
    ```bash
-   cd /Users/decod3rslabs/www/premiere/mcp/adobe-mcp/proxy-server
+   cd /Users/decod3rslabs/www/premiere/mcp/adobe-premiere-mcp/proxy-server
    node proxy.js
    ```
 
@@ -83,7 +83,7 @@ The `.claude/settings.json` has been updated with:
       "type": "stdio",
       "command": "python3",
       "args": ["-m", "server"],
-      "cwd": "./mcp/premiere-mcp"
+      "cwd": "./mcp/premiere-python-mcp"
     },
     "adobe-premiere": {
       "type": "stdio",
@@ -116,7 +116,7 @@ The `.claude/settings.json` has been updated with:
 - `import_media` - Import media files
 - `create_sequence_from_media` - Create timeline sequence
 - `save_project` - Save current project
-- And more (see adobe-mcp README)
+- And more (see adobe-premiere-mcp README)
 
 ## Workflow Usage
 
@@ -165,16 +165,16 @@ Use adobe_premiere_compare_outputs with:
 ## Files Reference
 
 ### Bridge Modules (new)
-- `mcp/adobe-mcp/bridge.py` - Converts segments.json to Premiere format
-- `mcp/adobe-mcp/jsx_runner.py` - Executes commands via proxy
-- `mcp/adobe-mcp/premiere_tools.py` - High-level MCP tools
+- `mcp/adobe-premiere-mcp/bridge.py` - Converts segments.json to Premiere format
+- `mcp/adobe-premiere-mcp/jsx_runner.py` - Executes commands via proxy
+- `mcp/adobe-premiere-mcp/premiere_tools.py` - High-level MCP tools
 
 ### ExtendScript Files (existing)
 - `scripts/apply-cuts.jsx` - Timeline cut operations
 - `scripts/batch-operations.jsx` - Full workflow operations
 
 ### UXP Plugin
-- `mcp/adobe-mcp/uxp-plugins/premiere/` - Premiere Pro plugin
+- `mcp/adobe-premiere-mcp/uxp-plugins/premiere/` - Premiere Pro plugin
 
 ## Troubleshooting
 

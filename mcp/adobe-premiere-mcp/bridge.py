@@ -1,7 +1,7 @@
 """Bridge module to convert Python pipeline output to Premiere format.
 
 This module provides utilities to convert silence detection segments from
-the Python pipeline (premiere-mcp) to the format expected by Adobe Premiere
+the Python pipeline (`premiere-python-mcp`) to the format expected by Adobe Premiere
 ExtendScript files (apply-cuts.jsx).
 """
 

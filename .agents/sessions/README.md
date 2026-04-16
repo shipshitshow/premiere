@@ -29,4 +29,4 @@ Each session entry includes:
 ## Related Documentation
 
 - `.agent/sessions/` - Legacy session files
-- `mcp/adobe-mcp/` - Adobe Premiere MCP integration
+- `mcp/adobe-premiere-mcp/` - Adobe Premiere MCP integration

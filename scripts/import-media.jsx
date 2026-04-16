@@ -1,6 +1,6 @@
 /**
  * Import media files into Premiere Pro project
- * Called by adobe-mcp with file paths
+ * Called by adobe-premiere-mcp with file paths
  *
  * @param {string[]} filePaths - Array of file paths to import
  * @param {string} binName - Optional bin name to import into

@@ -26,15 +26,8 @@ jobs:
       - name: Run Ruff critical checks
         run: |
           ruff check --select E9,F821,F822,F823 \
-            apps/premiere/adobe-mcp/adobe_mcp/premiere \
-            apps/premiere/adobe-mcp/bridge.py \
-            apps/premiere/adobe-mcp/jsx_runner.py \
-            apps/premiere/adobe-mcp/premiere_tools.py
+            apps/premiere/adobe-mcp/adobe_mcp
 
       - name: Compile active Premiere MCP Python
         run: |
-          python -m compileall -q \
-            apps/premiere/adobe-mcp/adobe_mcp/premiere \
-            apps/premiere/adobe-mcp/bridge.py \
-            apps/premiere/adobe-mcp/jsx_runner.py \
-            apps/premiere/adobe-mcp/premiere_tools.py
+          python -m compileall -q apps/premiere/adobe-mcp/adobe_mcp

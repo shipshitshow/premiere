@@ -146,9 +146,6 @@ function sendToApplication(packet) {
   return false
 }
 
-// Example: Use this function elsewhere in your code
-// sendToApplication('photoshop', { message: 'Update available' });
-
 server.listen(PORT, () => {
-  console.log(`adb-mcp Command proxy server running on ws://localhost:${PORT}`)
+  console.log(`Premiere MCP command proxy running on ws://localhost:${PORT}`)
 })

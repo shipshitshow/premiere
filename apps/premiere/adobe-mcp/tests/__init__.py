@@ -1,1 +1,0 @@
-"""Test suite for Adobe MCP servers."""

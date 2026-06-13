@@ -130,4 +130,4 @@ user or stop with a clear status.
 Read these only if needed:
 
 - `.agents/memory/premiere-workflow.md`
-- `apps/premiere/adobe-mcp/PREMIERE_PIPELINE_SETUP.md`
+- `apps/premiere/adobe-mcp/PREMIERE_MCP_WORKFLOW.md`

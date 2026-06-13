@@ -1,12 +1,12 @@
 {
-  "name": "premiere-dev-tools",
+  "name": "adobe-premiere-mcp-editor",
   "private": true,
   "version": "0.0.0",
-  "description": "Repo-level developer tooling for formatting and git hooks",
+  "description": "Developer tooling for the Adobe Premiere MCP editor",
   "scripts": {
     "format": "bunx biome format --write .",
     "format:check": "bunx biome ci .",
-    "premiere:check": "python3 -m py_compile apps/premiere/adobe-mcp/adobe_mcp/premiere/server.py",
+    "premiere:check": "python3 -m compileall -q apps/premiere/adobe-mcp/adobe_mcp",
     "premiere:proxy": "cd apps/premiere/adobe-mcp/proxy-server && node proxy.js",
     "prepare": "husky"
   },

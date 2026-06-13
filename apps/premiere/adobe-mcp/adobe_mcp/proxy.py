@@ -1,4 +1,4 @@
-"""Adobe MCP Proxy Server launcher."""
+"""Premiere MCP proxy server launcher."""
 
 import subprocess
 import sys
@@ -15,7 +15,7 @@ def main():
         subprocess.run(["npm", "install"], cwd=proxy_dir, check=True)
     
     # Run the proxy server
-    print("Starting Adobe MCP Proxy Server...")
+    print("Starting Premiere MCP proxy server...")
     try:
         subprocess.run(["node", "proxy.js"], cwd=proxy_dir, check=True)
     except KeyboardInterrupt:

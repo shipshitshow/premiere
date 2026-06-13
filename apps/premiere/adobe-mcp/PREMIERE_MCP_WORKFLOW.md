@@ -62,7 +62,6 @@ The repo-level MCP configs point at:
 
 ```text
 command: ./.venv/bin/adobe-premiere
-SCRIPTS_DIR: ./apps/premiere/scripts
 PROXY_URL: http://localhost:3001
 PROXY_TIMEOUT: 120
 ```

@@ -200,13 +200,13 @@ socket_client.configure(
 
 init(APPLICATION, socket_client)
 
-# Register high-level tools for Python pipeline integration
+# Register additional Premiere-only UXP tools.
 try:
-    from ...premiere_tools import register_tools
+    from .tools import register_tools
     register_tools(mcp)
-    print("Registered Python pipeline integration tools", file=sys.stderr)
+    print("Registered extended Premiere tools", file=sys.stderr)
 except ImportError as e:
-    print(f"Note: Python pipeline tools not available: {e}", file=sys.stderr)
+    print(f"Note: extended Premiere tools not available: {e}", file=sys.stderr)
 
 @mcp.tool()
 def get_project_info():

@@ -1,16 +1,19 @@
-# Adobe MCP For Premiere
+# Adobe Premiere MCP
 
-This is the active MCP workspace for controlling Adobe Premiere Pro from this
-repo. The upstream package still contains support files for other Adobe apps,
-but this repo's workflow is Premiere-first.
+This package exposes one thing: an MCP server for controlling Adobe Premiere Pro
+through the Premiere UXP plugin in this repo.
+
+It is intentionally not a multi-app Adobe server. Non-Premiere app
+modules, plugins, icon assets, generic launch menus, and legacy pipeline helpers
+have been removed so agents stay on the live Premiere editing workflow.
 
 ## Components
 
-- `adobe_mcp/premiere/` - Premiere MCP server.
+- `adobe_mcp/premiere/` - Premiere MCP server and additional UXP-backed tools.
 - `adobe_mcp/shared/` - Shared proxy/socket utilities.
-- `proxy-server/` - WebSocket bridge on `localhost:3001`.
-- `uxp-plugins/premiere/` - Premiere UXP plugin.
-- `../scripts/` - ExtendScripts used by the Premiere workflow.
+- `proxy-server/` - Socket.IO bridge on `localhost:3001`.
+- `uxp-plugins/premiere/` - Premiere UXP plugin loaded by UXP Developer Tools.
+- `../scripts/` - Premiere ExtendScript helpers, used only when explicitly needed.
 
 ## Install
 
@@ -48,14 +51,24 @@ The MCP command configured at the repo root is:
 ./.venv/bin/adobe-premiere
 ```
 
+## Tool Surface
+
+The core server handles project/sequence inspection, media import, timeline
+editing, markers, trim, clip removal, keyboard-backed actions, and
+`remove_silence_segments`.
+
+The additional Premiere tools expose UXP-backed export, transcripts, keyframes,
+effect lookup/application, transition lookup/application, work area selection,
+subsequence creation, clip handles, sequence selection, and MOGRT insertion.
+
 ## Workflow Contract
 
 - Edit the active Premiere sequence.
-- Use `remove_silence_segments` for transcript removal ranges.
+- Prefer `remove_silence_segments` for transcript removal ranges.
 - Verify the timeline layout after tool calls.
 - Stop on focus, connection, sequence identity, or verification uncertainty.
-- Do not create rendered replacements or alternate timelines unless explicitly
-  requested.
+- Do not create rendered replacements, alternate timelines, or parallel edit
+  outputs unless explicitly requested.
 
-See `PREMIERE_PIPELINE_SETUP.md` and `.agents/memory/premiere-workflow.md` for
-the repo-level workflow rules.
+See `PREMIERE_MCP_WORKFLOW.md` and
+`.agents/memory/premiere-workflow.md` for the repo-level workflow rules.

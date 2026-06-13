@@ -1,0 +1,42 @@
+{
+  "id": "com.mcp.premiere.agent",
+  "name": "Premiere MCP Agent",
+  "version": "0.85.0",
+  "main": "index.html",
+  "host": {
+    "app": "premierepro",
+    "minVersion": "22.3"
+  },
+  "manifestVersion": 5,
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "mcpPanel",
+      "label": {
+        "default": "Premiere MCP Agent"
+      },
+      "minimumSize": {
+        "width": 300,
+        "height": 200
+      },
+      "maximumSize": {
+        "width": 500,
+        "height": 400
+      },
+      "preferredDockedSize": {
+        "width": 300,
+        "height": 200
+      },
+      "preferredFloatingSize": {
+        "width": 300,
+        "height": 200
+      }
+    }
+  ],
+  "requiredPermissions": {
+    "network": {
+      "domains": "all"
+    },
+    "localFileSystem": "fullAccess"
+  }
+}

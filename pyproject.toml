@@ -1,7 +1,7 @@
 [project]
-name = "premiere-workspace"
+name = "adobe-premiere-mcp-editor"
 version = "0.1.0"
-description = "Premiere Hybrid Editing System - Python app + Adobe MCP + ExtendScript"
+description = "Adobe Premiere Pro MCP editor workspace"
 requires-python = ">=3.11"
 
 [tool.ruff]

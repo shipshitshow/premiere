@@ -4,12 +4,16 @@
   "version": "0.0.0",
   "description": "Repo-level developer tooling for formatting and git hooks",
   "scripts": {
-    "format": "biome format --write .",
-    "format:check": "biome check .",
+    "format": "bunx biome format --write .",
+    "format:check": "bunx biome ci .",
+    "premiere:check": "python3 -m py_compile apps/premiere/adobe-mcp/adobe_mcp/premiere/server.py",
+    "premiere:proxy": "cd apps/premiere/adobe-mcp/proxy-server && node proxy.js",
     "prepare": "husky"
   },
   "lint-staged": {
-    "*.{js,jsx,json,jsonc}": ["biome format --write"]
+    "{package.json,biome.json,.mcp.json,.claude/settings.json,.vscode/settings.json,.vscode/extensions.json,apps/premiere/adobe-mcp/proxy-server/proxy.js,apps/premiere/adobe-mcp/proxy-server/package.json,apps/premiere/adobe-mcp/uxp-plugins/premiere/package.json,apps/premiere/adobe-mcp/uxp-plugins/premiere/manifest.json}": [
+      "bunx biome format --write"
+    ]
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

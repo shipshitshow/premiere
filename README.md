@@ -1,185 +1,82 @@
-# Premiere Hybrid Editing System
+# Adobe Premiere MCP Editor
 
-A unified system for video editing combining:
-- **Python App** - Automated "run once and done" processing
-- **Adobe MCP** - Claude-controlled manual editing in Premiere Pro
-- **ExtendScripts** - Adobe automation inside Premiere
+This repo is the workspace for editing inside Adobe Premiere Pro through the
+Adobe MCP bridge. The source of truth is the live Premiere timeline, not a
+separate Python-rendered edit.
 
-## Project Structure
+The old self-editing Python app has been removed from the working tree. Git
+history is the archive.
 
+## Active Workflow
+
+Use this repo when the job is:
+
+- inspect or modify the active Premiere Pro sequence
+- run transcript-driven removal ranges against the Premiere timeline
+- operate the Adobe MCP proxy and UXP bridge
+- maintain JSX scripts used by Premiere automation
+- document the safe Premiere editing workflow for agents
+
+Do not create replacement timelines, rendered proxy edits, or alternate Python
+assemblies unless the user explicitly asks for that recovery path.
+
+## Layout
+
+```text
+apps/premiere/
+├── adobe-mcp/              # Adobe MCP server, proxy, and UXP plugin workspace
+├── scripts/                # ExtendScript files executed inside Premiere
+└── skills/                 # Repo-local workflow instructions
+
+.agents/                   # Durable agent context and session notes
+.claude/                   # Claude MCP config
+.codex/                    # Codex MCP config
+.mcp.json                  # MCP config used by compatible clients
 ```
-premiere/
-├── app/                          # Python video processor
-│   ├── src/premiere/
-│   │   ├── processors/           # Silence, audio, video processors
-│   │   ├── generators/           # Clips, metadata, thumbnails
-│   │   ├── uploaders/            # YouTube upload
-│   │   └── utils/                # FFmpeg, Claude CLI wrappers
-│   ├── tests/
-│   ├── pyproject.toml
-│   └── README.md
-│
-├── mcp/                          # MCP servers for Claude Code
-│   ├── premiere-python-mcp/      # Control Python app via MCP
-│   │   ├── server.py
-│   │   └── tools/
-│   └── adobe-premiere-mcp/       # Control Adobe Premiere Pro
-│
-└── scripts/                      # ExtendScript for Adobe automation
-    ├── import-media.jsx
-    ├── create-sequence.jsx
-    ├── apply-cuts.jsx
-    ├── add-markers.jsx
-    ├── export-sequence.jsx
-    └── batch-operations.jsx
-```
 
-## Two Workflows
+## Running The Premiere Bridge
 
-### Workflow A: Automated Processing (Python App)
-
-Use when you want to process a video and be done with it.
+Start the proxy:
 
 ```bash
-# Process video through full pipeline
-cd app && premiere process ~/Videos/livestream.mp4
-
-# Or with specific options
-premiere process video.mp4 --clips --max-clips 5 --upload
+bun run premiere:proxy
 ```
 
-Via Claude Code with MCP:
-```
-"Process my livestream and find viral clips"
-→ premiere_process + premiere_detect_clips
-```
+Then connect the Premiere UXP plugin from:
 
-### Workflow B: Creative Editing (Adobe MCP)
-
-Use when you need manual control, preview, or creative decisions.
-
-```
-"Open this in Premiere and show me the timeline"
-→ adobe_create_project + adobe_import_media
-
-"Cut at 5:32 and add a transition"
-→ Claude sends commands to Premiere
-→ You see changes live
+```text
+apps/premiere/adobe-mcp/uxp-plugins/premiere
 ```
 
-## Setup
+The MCP server command is configured as:
 
-### 1. Python App
+```text
+./.venv/bin/adobe-premiere
+```
+
+The shared script directory is:
+
+```text
+apps/premiere/scripts
+```
+
+## Safety Rules
+
+- Use `remove_silence_segments` for transcript-based deletion ranges.
+- Verify timeline changes with project or sequence inspection after each cut batch.
+- Treat MCP success responses as untrusted until the sequence layout actually changes.
+- Do not use split/delete fallback tools that can desync linked audio and video.
+- Do not use `set_clip_position` to close gaps; it can stretch clips.
+- Stop if Premiere focus, keyboard automation, or sequence identity is uncertain.
+
+## Checks
+
+Headless checks cover syntax and repo hygiene only:
 
 ```bash
-cd app
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-
-# Verify installation
-premiere --version
-premiere info ~/Videos/test.mp4
+bun run premiere:check
+bun run format:check
 ```
 
-### 2. premiere-python-mcp (MCP Server)
-
-```bash
-cd mcp/premiere-python-mcp
-pip install -e .
-```
-
-Add to Claude Code settings (`~/.claude/settings.json`):
-
-```json
-{
-  "mcpServers": {
-    "premiere": {
-      "type": "stdio",
-      "command": "python",
-      "args": ["-m", "server"],
-      "cwd": "~/www/VincentShipsIt/premiere/mcp/premiere-python-mcp"
-    }
-  }
-}
-```
-
-### 3. adobe-premiere-mcp (Optional)
-
-See [mcp/adobe-premiere-mcp/README.md](mcp/adobe-premiere-mcp/README.md) for setup instructions.
-
-## MCP Tools
-
-### premiere (Python App)
-
-| Tool | Purpose |
-|------|---------|
-| `premiere_info` | Get video file information |
-| `premiere_download` | Download from YouTube |
-| `premiere_detect_segments` | Analyze silence/speech |
-| `premiere_detect_clips` | Find viral moments with AI |
-| `premiere_process` | Run automated pipeline |
-| `premiere_cut_silence` | Remove silence from video |
-| `premiere_enhance_audio` | Improve audio quality |
-| `premiere_transcribe` | Transcribe audio to text |
-| `premiere_export` | Export processed video |
-| `premiere_export_clips` | Export multiple clips |
-
-### adobe-premiere (Premiere Pro)
-
-| Tool | Purpose |
-|------|---------|
-| `adobe_create_project` | Create new Premiere project |
-| `adobe_import_media` | Import files into project |
-| `adobe_create_sequence` | Create timeline |
-| `adobe_insert_clip` | Add clip to timeline |
-| `adobe_apply_effect` | Apply video/audio effect |
-| `adobe_add_marker` | Add marker at timestamp |
-| `adobe_export` | Export sequence |
-
-## ExtendScripts
-
-Scripts in `scripts/` can be called by `adobe-premiere-mcp` or run directly in Premiere:
-
-- **import-media.jsx** - Import files into project bins
-- **create-sequence.jsx** - Create sequences from presets
-- **apply-cuts.jsx** - Remove silence segments from timeline
-- **add-markers.jsx** - Add markers for clips, chapters
-- **export-sequence.jsx** - Queue exports to Media Encoder
-- **batch-operations.jsx** - Combined workflows
-
-## Example Workflows
-
-### Quick Automated Edit
-
-```bash
-# Download and process in one go
-premiere download "https://youtube.com/..." --process
-
-# Process local file with clips
-premiere process video.mp4 --clips --max-clips 5
-```
-
-### Via Claude Code
-
-```
-"Download my livestream from [URL] and remove silence"
-"What clips did it find? Export 1, 3, and 5"
-"Open the processed video in Premiere for fine-tuning"
-```
-
-### Fine-Tuning in Premiere
-
-```
-"Add a crossfade at 10:32"
-"Mark chapters at 0:00, 5:23, 12:45"
-"Export just the intro section (0:00-2:30)"
-```
-
-## Dependencies
-
-- Python 3.11+
-- FFmpeg
-- OpenAI Whisper (for transcription)
-- yt-dlp (for downloads)
-- Adobe Premiere Pro (for `adobe-premiere-mcp` workflow)
+Live editing behavior still requires Premiere Pro, the proxy server, and the UXP
+plugin to be running.

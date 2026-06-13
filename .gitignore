@@ -67,6 +67,8 @@ music/*.wav
 !.claude/settings.json
 !.mcp.json
 !package.json
+!apps/premiere/adobe-mcp/proxy-server/package-lock.json
+!apps/premiere/adobe-mcp/uxp-plugins/premiere/manifest.json
 !biome.json
 !bun.lock
 !bun.lockb

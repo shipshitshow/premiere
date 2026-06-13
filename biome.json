@@ -6,6 +6,12 @@
     "indentWidth": 2,
     "lineWidth": 100
   },
+  "linter": {
+    "enabled": false
+  },
+  "organizeImports": {
+    "enabled": false
+  },
   "javascript": {
     "formatter": {
       "quoteStyle": "single",
@@ -14,9 +20,10 @@
   },
   "files": {
     "include": [
-      "scripts/**/*.jsx",
-      "mcp/**/*.js",
-      "mcp/**/*.json",
+      "apps/premiere/adobe-mcp/proxy-server/proxy.js",
+      "apps/premiere/adobe-mcp/proxy-server/package.json",
+      "apps/premiere/adobe-mcp/uxp-plugins/premiere/package.json",
+      "apps/premiere/adobe-mcp/uxp-plugins/premiere/manifest.json",
       ".claude/settings.json",
       ".mcp.json",
       ".vscode/settings.json",

@@ -1560,9 +1560,10 @@ def remove_silence_segments(sequence_id: str, silence_segments: list):
                 sendCommand(command)
                 time.sleep(0.5)
 
-                # Step 2: Extract (ripple delete marked range)
-                # Use send_keystroke_to_premiere which activates Premiere first
-                send_keystroke_to_premiere(";")
+                # Step 2: Extract (ripple delete marked range).
+                # Premiere Pro's default Extract shortcut is apostrophe (key code 39).
+                # Avoid activating on every cut; activation can hang while Premiere is busy.
+                _send_key_code_fast(39)
                 time.sleep(1.5)
 
                 results.append({"start": start, "end": end, "success": True})

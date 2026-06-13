@@ -1,0 +1,7 @@
+[mcp_servers.adobe-premiere]
+command = "./.venv/bin/adobe-premiere"
+
+[mcp_servers.adobe-premiere.env]
+SCRIPTS_DIR = "./scripts"
+PROXY_URL = "http://localhost:3001"
+PROXY_TIMEOUT = "120"

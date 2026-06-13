@@ -52,8 +52,10 @@ htmlcov/
 *.wav
 *.mp3
 temp/
+tmp/
 output/
 .premiere/
+.premiere-proxy.pid
 music/*.mp3
 music/*.wav
 

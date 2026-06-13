@@ -26,6 +26,15 @@ import sys
 import os
 import subprocess
 import time
+import math
+
+# Premiere uses 254016000000 ticks per second internally.
+TICKS_PER_SECOND = 254016000000
+
+# Name of the Premiere Pro application as macOS sees it (used by AppleScript).
+# Override with PREMIERE_APP_NAME when targeting a different version, e.g.
+# "Adobe Premiere Pro 2025". This avoids a yearly hard-coded breakage.
+PREMIERE_APP_NAME = os.environ.get("PREMIERE_APP_NAME", "Adobe Premiere Pro 2026")
 
 
 def send_keystroke_to_premiere(key: str, modifiers: list = None, retries: int = 2):
@@ -43,7 +52,7 @@ def send_keystroke_to_premiere(key: str, modifiers: list = None, retries: int = 
         modifier_str = ""
 
     script = f'''
-    tell application "Adobe Premiere Pro 2026" to activate
+    tell application "{PREMIERE_APP_NAME}" to activate
     delay 0.1
     tell application "System Events"
         keystroke "{key}"{modifier_str}
@@ -86,7 +95,7 @@ def send_key_code_to_premiere(key_code: int, modifiers: list = None, retries: in
         modifier_str = ""
 
     script = f'''
-    tell application "Adobe Premiere Pro 2026" to activate
+    tell application "{PREMIERE_APP_NAME}" to activate
     delay 0.1
     tell application "System Events"
         key code {key_code}{modifier_str}
@@ -116,7 +125,7 @@ def send_key_code_to_premiere(key_code: int, modifiers: list = None, retries: in
 
 def _ensure_premiere_focused():
     """Activate Premiere Pro once before a batch operation."""
-    script = 'tell application "Adobe Premiere Pro 2026" to activate'
+    script = f'tell application "{PREMIERE_APP_NAME}" to activate'
     subprocess.run(
         ["osascript", "-e", script],
         capture_output=True,
@@ -176,6 +185,384 @@ end tell'''
     if result.returncode != 0:
         raise Exception(f"AppleScript error: {result.stderr}")
     return True
+
+
+# =============================================================================
+# SEQUENCE LAYOUT / CUT VERIFICATION
+# These read the ACTUAL clip layout back from Premiere so we never trust a
+# tool's success flag alone (see CLAUDE.md and the premiere-mcp-ops skill).
+# =============================================================================
+
+def _fetch_layout(sequence_id: str) -> dict:
+    """Fetch the focused clip layout for one sequence.
+
+    Returns the plugin payload: {id, name, frameRateValue, ticksPerFrame,
+    videoTracks, audioTracks}. Raises (via sendCommand) if the plugin reports
+    failure.
+    """
+    response = sendCommand(createCommand("getSequenceLayout", {"sequenceId": sequence_id}))
+    if isinstance(response, dict):
+        return response.get("response", {}) or {}
+    return {}
+
+
+def _active_sequence_id() -> str:
+    """Return the id of the sequence Premiere currently has active, or "".
+
+    The Extract keystroke goes to whatever Timeline panel is FOCUSED — which is
+    the ACTIVE sequence, not necessarily the sequence_id we pass to a UXP query.
+    Before cutting we use this to assert they are the same, so we never razor the
+    wrong timeline. Best-effort: returns "" if the info cannot be read.
+    """
+    try:
+        response = sendCommand(createCommand("getProjectInfo", {}))
+        payload = response.get("response", {}) if isinstance(response, dict) else {}
+        return str(payload.get("activeSequenceId") or "")
+    except Exception:
+        return ""
+
+
+def _frame_ticks(layout: dict):
+    """Ticks per video frame from a layout, or None if unavailable."""
+    tpf = layout.get("ticksPerFrame")
+    if tpf:
+        try:
+            return int(tpf)
+        except (TypeError, ValueError):
+            pass
+    fr = layout.get("frameRateValue")
+    if fr:
+        try:
+            fr = float(fr)
+            if fr > 0:
+                # NTSC rates are k*1000/1001 (29.97, 23.976, 59.94...). Snap to the
+                # exact rational so ticks-per-frame doesn't drift over a long
+                # sequence. (Fallback only — ticksPerFrame above is exact when
+                # present.) Integer rates like 24/25/30 fail the proximity test
+                # and use the plain division.
+                k = round(fr * 1001 / 1000)
+                if k > 0 and abs(fr - k * 1000.0 / 1001.0) < 0.01:
+                    return int(round(TICKS_PER_SECOND * 1001 / (k * 1000)))
+                return int(round(TICKS_PER_SECOND / fr))
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _snap_to_frame(ticks: int, frame_ticks: int, mode: str = "round") -> int:
+    """Snap a tick value to a whole-frame boundary."""
+    if not frame_ticks or frame_ticks <= 0:
+        return int(ticks)
+    q = ticks / frame_ticks
+    if mode == "floor":
+        frames = math.floor(q)
+    elif mode == "ceil":
+        frames = math.ceil(q)
+    else:
+        frames = round(q)
+    return int(frames * frame_ticks)
+
+
+def _clips_from_layout(layout: dict):
+    """Flatten a layout into (video_clips, audio_clips).
+
+    Each clip: {kind: "v"|"a", trackIndex, start, end} in integer ticks. The
+    media kind matters because a video track and an audio track both report
+    index 0 — without the kind tag they would collide in a single bucket and a
+    video clip could hide an audio gap (or fabricate one). See _detect_gaps.
+    """
+    def collect(tracks, kind):
+        out = []
+        for track in tracks or []:
+            t_index = track.get("index", 0)
+            for clip in track.get("tracks", []):
+                try:
+                    start = int(clip["startTimeTicks"])
+                    end = int(clip["endTimeTicks"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                out.append({"kind": kind, "trackIndex": t_index, "start": start, "end": end})
+        return out
+
+    video = collect(layout.get("videoTracks"), "v")
+    audio = collect(layout.get("audioTracks"), "a")
+    return video, audio
+
+
+def _gap_record(kind, t_index, start, end, frame_ticks, leading=False):
+    gap = end - start
+    return {
+        "kind": kind,
+        "trackIndex": t_index,
+        "leading": leading,
+        "startTicks": start,
+        "endTicks": end,
+        "gapTicks": gap,
+        "gapSeconds": round(gap / TICKS_PER_SECOND, 4),
+        "gapFrames": round(gap / frame_ticks, 2) if frame_ticks else None,
+    }
+
+
+def _detect_gaps(clips: list, frame_ticks):
+    """Detect gaps on each (kind, trackIndex) lane — including a leading gap.
+
+    A "back to back" track has its first clip at tick 0 and every later clip
+    starting exactly where the previous one ends. We report:
+      - a LEADING gap when the first clip does not start at tick 0, and
+      - an inter-clip gap whenever clip[i+1].start > clip[i].end.
+    Video and audio are kept on separate lanes (keyed by media kind AND track
+    index) so a clip on one never masks or fabricates a gap on the other.
+
+    Gaps smaller than half a frame (or ~1ms when the frame rate is unknown) are
+    ignored as sub-frame rounding noise.
+    """
+    tol = (frame_ticks // 2) if frame_ticks else int(TICKS_PER_SECOND * 0.001)
+    by_lane = {}
+    for c in clips:
+        by_lane.setdefault((c.get("kind", "?"), c["trackIndex"]), []).append(c)
+
+    gaps = []
+    for (kind, t_index), lane in by_lane.items():
+        lane.sort(key=lambda c: c["start"])
+        if lane and lane[0]["start"] > tol:
+            gaps.append(_gap_record(kind, t_index, 0, lane[0]["start"], frame_ticks, leading=True))
+        for i in range(len(lane) - 1):
+            gap = lane[i + 1]["start"] - lane[i]["end"]
+            if gap > tol:
+                gaps.append(_gap_record(kind, t_index, lane[i]["end"], lane[i + 1]["start"], frame_ticks))
+    return gaps
+
+
+def _gaps_by_lane(gaps: list) -> dict:
+    """Count gaps per (kind, trackIndex) lane.
+
+    Comparing per-lane counts (not one global total) is what lets us catch a NEW
+    gap that is masked by a pre-existing gap closing elsewhere: the global count
+    can stay flat (one closes, one opens) while a lane that had zero gaps now has
+    one — the untargeted-track failure. Counts are used instead of absolute
+    positions because an Extract shifts every later clip left, so a surviving
+    gap's start tick changes; its lane and existence do not.
+    """
+    out = {}
+    for g in gaps or []:
+        key = (g.get("kind", "?"), g.get("trackIndex"))
+        out[key] = out.get(key, 0) + 1
+    return out
+
+
+def _av_misalignments(video: list, audio: list, frame_ticks):
+    """Cut junctions where video and audio do NOT line up to the frame.
+
+    After a clean Extract, every internal cut produces a clip boundary at the
+    SAME timecode on the video and the audio lane. If a cut shifted one but not
+    the other, their junctions diverge — that is the "audio drifted a frame off
+    the video" failure. We collect each lane's junctions (clip starts past the
+    head) and report any junction on one side with no partner on the other within
+    HALF a frame. The match tolerance is sub-frame on purpose: a frame-snapped
+    Extract lands V and A on the EXACT same tick, so a full one-frame offset is a
+    real desync and must be flagged — matching within a whole frame would hide
+    exactly the 1-frame drift the user reports. Empty list == frame-accurate
+    sync. Returns [] when either side has no clips (sync is undefined for a
+    single-media sequence).
+
+    Note: junctions are pooled across ALL video tracks vs ALL audio tracks. This
+    is exact right after a transcript cut (only the linked base layer exists). If
+    you call it later, after b-roll or music is layered on higher tracks, a clip
+    boundary on V2/A2 that legitimately does not line up with the base layer can
+    show as a misalignment — so trust it most immediately after the cut.
+    """
+    if not video or not audio:
+        return []
+    ft = frame_ticks or int(TICKS_PER_SECOND / 24)
+    thr = max(ft // 2, 1)
+    # Match tolerance: half a frame. Allows pure integer-rounding noise on a
+    # snapped boundary but treats a one-frame (or larger) offset as a misalignment.
+    match_tol = thr
+    v_junctions = sorted({c["start"] for c in video if c["start"] > thr})
+    a_junctions = sorted({c["start"] for c in audio if c["start"] > thr})
+
+    def unmatched(points, others, side):
+        out = []
+        for t in points:
+            nearest = min((abs(t - o) for o in others), default=None)
+            if nearest is None or nearest > match_tol:
+                out.append({
+                    "side": side,
+                    "tick": t,
+                    "seconds": round(t / TICKS_PER_SECOND, 4),
+                    "frame": round(t / ft, 2),
+                    "offsetFrames": round(nearest / ft, 2) if nearest is not None else None,
+                })
+        return out
+
+    return unmatched(v_junctions, a_junctions, "video") + unmatched(a_junctions, v_junctions, "audio")
+
+
+def _summarize_layout(layout: dict) -> dict:
+    """Reduce a raw layout to the numbers we verify against."""
+    frame_ticks = _frame_ticks(layout)
+    video, audio = _clips_from_layout(layout)
+
+    video_end = max((c["end"] for c in video), default=0)
+    audio_end = max((c["end"] for c in audio), default=0)
+    duration_ticks = max(video_end, audio_end)
+
+    # Content = summed clip durations per media kind. Removal is measured against
+    # this (not the global end) so an untouched longer track — a music bed or a
+    # full-length title — cannot mask how much was actually cut.
+    video_content = sum((c["end"] - c["start"]) for c in video)
+    audio_content = sum((c["end"] - c["start"]) for c in audio)
+
+    gaps = _detect_gaps(video + audio, frame_ticks)
+
+    return {
+        "videoClipCount": len(video),
+        "audioClipCount": len(audio),
+        "durationTicks": duration_ticks,
+        "durationSeconds": round(duration_ticks / TICKS_PER_SECOND, 4),
+        "videoEndTicks": video_end,
+        "audioEndTicks": audio_end,
+        "videoContentTicks": video_content,
+        "audioContentTicks": audio_content,
+        "gaps": gaps,
+        "gapCount": len(gaps),
+        "frameTicks": frame_ticks,
+    }
+
+
+def _verify_cut(sequence_id: str, before: dict, expected_removed_ticks: int, frame_ticks, cut_count=1):
+    """Compare the post-cut layout to the pre-cut baseline.
+
+    Returns {verified, packed, avSynced, ...}. ``verified`` is True only when the
+    right amount of content was removed, the cut introduced no new gaps, and
+    video/audio still cut at the same timecodes (frame-accurate sync). It is None
+    when no usable baseline was captured (cannot confirm a delta), and False when
+    any of those checks fail.
+
+    The two halves the user cares about are surfaced explicitly:
+      - ``packed``   — True when the whole sequence is back to back, zero gaps.
+      - ``avSynced`` — True when every cut lands on the same frame for V and A.
+    """
+    try:
+        after_layout = _fetch_layout(sequence_id)
+        after = _summarize_layout(after_layout)
+        a_video, a_audio = _clips_from_layout(after_layout)
+    except Exception as e:
+        return {"verified": None, "error": f"Could not read layout after cut: {e}"}
+
+    if not before or before.get("error") or before.get("durationTicks") is None:
+        return {
+            "verified": None,
+            "reason": "No usable pre-cut baseline; cannot confirm the change.",
+            "packed": after["gapCount"] == 0,
+            "after": {k: after.get(k) for k in ("videoClipCount", "audioClipCount", "durationSeconds", "gapCount")},
+        }
+
+    ft = frame_ticks or after.get("frameTicks") or int(TICKS_PER_SECOND / 24)
+
+    # Removal measured on CONTENT per kind, so a longer untouched track can't
+    # mask the cut. Take the larger of the two — a symmetric Extract moves both.
+    v_removed = before.get("videoContentTicks", 0) - after.get("videoContentTicks", 0)
+    a_removed = before.get("audioContentTicks", 0) - after.get("audioContentTicks", 0)
+    actual_removed = max(v_removed, a_removed)
+
+    # Slack scales with the NUMBER of cuts: frame-snapping each of a cut's two
+    # boundaries by up to half a frame moves the removed length by at most one
+    # whole frame per cut. The tolerance is exactly that budget (with a 2-frame
+    # floor for a single cut) — it never balloons on a large batch and so cannot
+    # silently confirm a partial cut. Because removed_close is bounded by this on
+    # BOTH sides, an under-removal beyond the budget already fails removed_close.
+    removed_tol = max(2 * ft, cut_count * ft)
+    duration_changed = actual_removed >= ft
+    removed_close = abs(actual_removed - expected_removed_ticks) <= removed_tol
+    under_removed = (expected_removed_ticks - actual_removed) > removed_tol
+
+    # Gaps: a clean Extract closes the gap it makes, so it can only reduce gaps on
+    # the targeted lanes, never add one. Compare gap counts PER LANE, not as one
+    # global total: a global count can stay flat when a pre-existing gap closes
+    # while a new one opens on an untargeted lane. Any lane whose gap count went
+    # UP is a newly introduced gap (the timeline is no longer back to back there).
+    packed = after["gapCount"] == 0
+    before_lanes = _gaps_by_lane(before.get("gaps", []))
+    after_lanes = _gaps_by_lane(after["gaps"])
+    new_gap_lanes = [lane for lane, n in after_lanes.items() if n > before_lanes.get(lane, 0)]
+    new_gap_count = sum(n - before_lanes.get(lane, 0) for lane, n in after_lanes.items()
+                        if n > before_lanes.get(lane, 0))
+    no_new_gaps = not new_gap_lanes
+
+    # A/V sync: video and audio must cut at the same frame. End-skew is a weaker
+    # secondary signal kept for the case where one media kind is absent.
+    av_applicable = bool(a_video) and bool(a_audio)
+    misalignments = _av_misalignments(a_video, a_audio, ft) if av_applicable else []
+    if before.get("videoClipCount") and before.get("audioClipCount") and a_video and a_audio:
+        end_skew = abs((before["videoEndTicks"] - after["videoEndTicks"]) -
+                       (before["audioEndTicks"] - after["audioEndTicks"]))
+        end_skew_ok = end_skew <= 2 * ft
+    else:
+        end_skew_ok = True
+    av_synced = (not misalignments) and end_skew_ok
+
+    verified = bool(duration_changed and removed_close and no_new_gaps and av_synced)
+
+    warnings = []
+    if not duration_changed:
+        warnings.append(
+            "Sequence duration did not change — the Extract keystroke likely did not land, "
+            "or a DIFFERENT sequence is the active/focused Timeline. Confirm the target "
+            "sequence is the active one and Premiere is frontmost with the Timeline focused."
+        )
+    if not no_new_gaps:
+        lanes = ", ".join(f"{k}{ti}" for (k, ti) in new_gap_lanes)
+        warnings.append(
+            f"The cut INTRODUCED {new_gap_count} new gap(s) on lane(s) {lanes} — clips are "
+            "not back to back (a track was likely not targeted). Do not close them with "
+            "set_clip_position/split/trim; report for manual packing."
+        )
+    elif not packed:
+        warnings.append(
+            f"{after['gapCount']} pre-existing gap(s) remain elsewhere on the timeline "
+            "(not introduced by this cut). The sequence is not fully back to back."
+        )
+    if duration_changed and not removed_close:
+        warnings.append(
+            f"Removed ~{actual_removed / TICKS_PER_SECOND:.2f}s but expected "
+            f"~{expected_removed_ticks / TICKS_PER_SECOND:.2f}s."
+        )
+    elif under_removed:
+        warnings.append(
+            f"Removed ~{actual_removed / TICKS_PER_SECOND:.2f}s, ~"
+            f"{(expected_removed_ticks - actual_removed) / TICKS_PER_SECOND:.2f}s short of expected — "
+            "some segments may not have been extracted."
+        )
+    if misalignments:
+        spots = ", ".join(f"{m['side']}@{m['seconds']}s" for m in misalignments[:6])
+        warnings.append(
+            f"AUDIO/VIDEO OUT OF SYNC at {len(misalignments)} cut point(s): {spots}. "
+            "A cut landed on a different frame for video vs audio."
+        )
+    elif not end_skew_ok:
+        warnings.append(
+            "Video and audio ends shifted by different amounts — possible A/V desync; "
+            "check that every track you meant to cut was targeted."
+        )
+
+    return {
+        "verified": verified,
+        "packed": packed,
+        "avSynced": av_synced,
+        "expectedRemovedSeconds": round(expected_removed_ticks / TICKS_PER_SECOND, 4),
+        "actualRemovedSeconds": round(actual_removed / TICKS_PER_SECOND, 4),
+        "expectedRemovedFrames": round(expected_removed_ticks / ft, 2) if ft else None,
+        "actualRemovedFrames": round(actual_removed / ft, 2) if ft else None,
+        "videoRemovedSeconds": round(v_removed / TICKS_PER_SECOND, 4),
+        "audioRemovedSeconds": round(a_removed / TICKS_PER_SECOND, 4),
+        "newGapsIntroduced": new_gap_count,
+        "residualGaps": after["gaps"],
+        "avMisalignments": misalignments,
+        "before": {k: before.get(k) for k in ("videoClipCount", "audioClipCount", "durationSeconds", "gapCount")},
+        "after": {k: after.get(k) for k in ("videoClipCount", "audioClipCount", "durationSeconds", "gapCount")},
+        "warnings": warnings,
+    }
 
 
 #logger.log(f"Python path: {sys.executable}")
@@ -757,6 +1144,10 @@ def import_media(file_paths:list):
 @mcp.tool()
 def split_video_clip(sequence_id: str, video_track_index: int, track_item_index: int, split_time_seconds: float):
     """
+    UNSAFE for transcript cuts: splitting then deleting can desync linked
+    video/audio or leave gaps. Prefer remove_silence_segments. See the
+    premiere-mcp-ops skill.
+
     Splits a video clip at the specified time, creating two separate clips.
 
     The original clip will end at the split point, and a new clip will be created
@@ -787,6 +1178,10 @@ def split_video_clip(sequence_id: str, video_track_index: int, track_item_index:
 @mcp.tool()
 def split_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: int, split_time_seconds: float):
     """
+    UNSAFE for transcript cuts: splitting then deleting can desync linked
+    video/audio or leave gaps. Prefer remove_silence_segments. See the
+    premiere-mcp-ops skill.
+
     Splits an audio clip at the specified time, creating two separate clips.
 
     Args:
@@ -850,7 +1245,11 @@ def batch_split_clips(sequence_id: str, split_times_seconds: list,
                       video_track_index: int = None, video_clip_index: int = 0,
                       audio_track_index: int = None, audio_clip_index: int = 0):
     """
-    Performs multiple splits at once - ideal for silence removal workflows.
+    UNSAFE for transcript cuts: batch splitting then deleting can desync linked
+    video/audio or leave gaps. Prefer remove_silence_segments. See the
+    premiere-mcp-ops skill.
+
+    Performs multiple splits at once.
 
     Splits are performed from end to start to preserve clip indices.
     Each split creates a separate undo entry.
@@ -885,6 +1284,9 @@ def trim_video_clip(sequence_id: str, video_track_index: int, track_item_index: 
                     new_in_point_seconds: float = None, new_out_point_seconds: float = None,
                     linked: bool = True, audio_track_index: int = 0):
     """
+    UNSAFE for transcript cuts: manual trims can desync linked video/audio or
+    leave gaps. Prefer remove_silence_segments. See the premiere-mcp-ops skill.
+
     Trims a video clip by adjusting its start/end times or in/out points.
     By default, also trims the linked audio counterpart.
 
@@ -931,6 +1333,9 @@ def trim_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: 
                     new_in_point_seconds: float = None, new_out_point_seconds: float = None,
                     linked: bool = True, linked_video_track_index: int = 0):
     """
+    UNSAFE for transcript cuts: manual trims can desync linked video/audio or
+    leave gaps. Prefer remove_silence_segments. See the premiere-mcp-ops skill.
+
     Trims an audio clip by adjusting its start/end times or in/out points.
     By default, also trims the linked video counterpart.
 
@@ -972,11 +1377,13 @@ def trim_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: 
 def remove_video_clip_range(sequence_id: str, video_track_index: int, track_item_index: int,
                             range_start_seconds: float, range_end_seconds: float):
     """
+    UNSAFE for transcript cuts: operates on video only, so it can desync linked
+    audio. Prefer remove_silence_segments. See the premiere-mcp-ops skill.
+
     Removes a section from a video clip, keeping the content before and after the range.
 
-    This is useful for removing silence or unwanted sections. The clip will be split
-    at the range boundaries, and the middle section will be removed (the second part
-    will be moved to connect with the first part).
+    The clip will be split at the range boundaries, and the middle section will be
+    removed (the second part will be moved to connect with the first part).
 
     Args:
         sequence_id (str): The id of the sequence containing the clip.
@@ -1002,11 +1409,14 @@ def remove_linked_clip_range(sequence_id: str, track_item_index: int,
                              range_start_seconds: float, range_end_seconds: float,
                              video_track_index: int = 0, audio_track_index: int = 0):
     """
+    UNSAFE for transcript cuts: API-based split+ripple has desynced linked
+    video/audio in this project. Prefer remove_silence_segments (native Extract).
+    See the premiere-mcp-ops skill.
+
     Removes a section from BOTH video and audio clips together, keeping content before and after.
 
-    This handles linked video+audio clips in a single operation. The clips will be split
-    at the range boundaries, and the middle section will be removed with the second part
-    moved to connect with the first part. Both tracks stay in sync.
+    The clips will be split at the range boundaries, and the middle section will be
+    removed with the second part moved to connect with the first part.
 
     Args:
         sequence_id (str): The id of the sequence containing the clip.
@@ -1225,6 +1635,10 @@ def move_clip(sequence_id: str, track_index: int, clip_index: int, is_video: boo
 def set_clip_position(sequence_id: str, track_index: int, clip_index: int, is_video: bool, new_start_seconds: float,
                       linked: bool = True, audio_track_index: int = 0):
     """
+    UNSAFE: can stretch/expand clips instead of moving them. Do NOT use to close
+    gaps. Prefer letting remove_silence_segments regroup via Extract. See the
+    premiere-mcp-ops skill.
+
     Moves a clip to an absolute position on the timeline. By default, also moves the linked audio/video counterpart.
 
     Args:
@@ -1401,6 +1815,10 @@ def send_keystroke(key: str, command: bool = False, shift: bool = False, option:
 @mcp.tool()
 def cut_at_playhead():
     """
+    UNSAFE for transcript cuts: razoring at the playhead and deleting separately
+    is not verified and can desync A/V. Prefer remove_silence_segments. See the
+    premiere-mcp-ops skill.
+
     Cut/razor all tracks at the current playhead position.
 
     This sends Cmd+D to Premiere Pro.
@@ -1413,6 +1831,10 @@ def cut_at_playhead():
 @mcp.tool()
 def ripple_delete():
     """
+    UNSAFE for transcript cuts: a bare ripple delete is not verified and can hit
+    the wrong segment or desync A/V. Prefer remove_silence_segments. See the
+    premiere-mcp-ops skill.
+
     Ripple delete the clip segment at the current playhead position.
 
     This sends Cmd+E (or your configured ripple delete shortcut) to Premiere Pro.
@@ -1514,44 +1936,125 @@ def go_to_end():
 
 
 @mcp.tool()
-def remove_silence_segments(sequence_id: str, silence_segments: list):
+def remove_silence_segments(sequence_id: str, silence_segments: list,
+                            frame_snap: bool = True, verify: bool = True):
     """
-    Remove silence segments from the timeline.
+    Cut the given segments out of the sequence and regroup (close the gaps).
 
-    This is the PREFERRED method for removing silence or unwanted sections.
-    For each segment, it:
-    1. Sets sequence in/out points around the silence range (via API)
-    2. Extracts (ripple deletes) the marked range (';' key via AppleScript)
+    This is the PRIMARY editing primitive for transcript-based cuts. For each
+    segment it sets the sequence in/out points (via the UXP API) and triggers
+    Premiere's native Extract command (apostrophe, macOS key code 39). Extract
+    ripple-deletes the marked range across the TARGETED video AND audio tracks
+    and shifts the remaining clips left to close the gap, so cutting and
+    regrouping happen together in one native, A/V-synced operation.
 
-    Extracts both video AND audio together using Premiere's native Extract command.
+    Segments are processed from END to START so earlier timecodes do not shift
+    before they are cut.
 
     Args:
-        sequence_id (str): The id of the sequence.
-        silence_segments (list): List of segments to remove. Each segment is a dict with:
-            - "start": Start time in seconds
-            - "end": End time in seconds
+        sequence_id (str): The id of the sequence to cut.
+        silence_segments (list): Segments to remove, in sequence-timeline seconds.
+            Each is a dict {"start": <sec>, "end": <sec>}.
             Example: [{"start": 10.5, "end": 12.3}, {"start": 25.0, "end": 27.5}]
+        frame_snap (bool): Snap each range to whole-frame boundaries before cutting
+            to avoid 1-frame video/audio gaps. Defaults to True. Skipped silently
+            if the sequence frame rate cannot be read.
+        verify (bool): After cutting, read the ACTUAL clip layout back from
+            Premiere and confirm the duration changed by the expected amount, no
+            gaps remain, and video/audio shifted by the same amount. Defaults to
+            True.
 
-    Note: Segments are processed from END to START to preserve earlier timecodes.
+    IMPORTANT: Treat "verified": false (or null, when verification could not run)
+    as NOT confirmed. Do not report the cut as successful — inspect the
+    "verification" block and follow the premiere-mcp-ops hard-stop contract.
+    Premiere must be frontmost with the Timeline focused for Extract to land, and
+    track targeting must include every track you intend to cut.
     """
-    TICKS_PER_SECOND = 254016000000
+    if not silence_segments:
+        return {
+            "action": "remove_silence_segments",
+            "processed": 0, "succeeded": 0, "failed": 0,
+            "verified": None,
+            "verification": {"reason": "No segments supplied; nothing to cut."},
+        }
 
-    # Sort segments by start time in descending order (process from end to start)
+    # SAFETY: the Extract keystroke lands on the ACTIVE/focused Timeline, which
+    # may not be the sequence_id passed. We ALWAYS make sequence_id active first
+    # (idempotent, and it focuses that Timeline) so we never rely on the right one
+    # already being focused — this is what stops the guard from "failing open"
+    # when the active id cannot be read. Then we confirm: if the active id reads
+    # back as a DIFFERENT sequence, setActiveSequence did not stick and we refuse
+    # (Extract would razor the wrong timeline). If it cannot be read at all, we
+    # proceed having set it active — the post-cut verify of THIS sequence_id will
+    # show no change if Extract somehow landed elsewhere.
+    try:
+        sendCommand(createCommand("setActiveSequence", {"sequenceId": sequence_id}))
+        time.sleep(0.4)
+    except Exception:
+        pass
+    active_id = _active_sequence_id()
+    if active_id and active_id != str(sequence_id):
+        return {
+            "action": "remove_silence_segments",
+            "processed": 0, "succeeded": 0, "failed": 0,
+            "verified": False,
+            "verification": {
+                "verified": False,
+                "reason": (
+                    f"Target sequence {sequence_id} could not be made active "
+                    f"(active is {active_id}). Extract would cut the wrong timeline. "
+                    "Open/click the target sequence's Timeline tab so it is active, "
+                    "then retry."
+                ),
+            },
+            "nextSteps": [
+                f"In Premiere, click the Timeline tab for sequence {sequence_id} "
+                "so it becomes the active/focused sequence.",
+                "Re-run remove_silence_segments with the same arguments.",
+            ],
+        }
+    active_unconfirmed = not active_id
+
+    # Sort segments by start time descending (process from end to start).
     sorted_segments = sorted(silence_segments, key=lambda x: x["start"], reverse=True)
+
+    # Pre-cut baseline (also gives us the frame rate for snapping).
+    before_summary = None
+    frame_ticks = None
+    if verify or frame_snap:
+        try:
+            before_summary = _summarize_layout(_fetch_layout(sequence_id))
+            frame_ticks = before_summary.get("frameTicks")
+        except Exception as e:
+            before_summary = {"error": str(e)}
+
+    # Activate Premiere ONCE for the whole batch. Per-cut activation can hang
+    # while Premiere is busy, so we deliberately do not re-activate per segment.
+    try:
+        _ensure_premiere_focused()
+    except Exception:
+        pass
 
     succeeded = 0
     failed = 0
     results = []
+    expected_removed_ticks = 0
     for seg in sorted_segments:
         start = seg.get("start")
         end = seg.get("end")
-        seg_ok = False
 
+        in_ticks = int(start * TICKS_PER_SECOND)
+        out_ticks = int(end * TICKS_PER_SECOND)
+        if frame_snap and frame_ticks:
+            in_ticks = _snap_to_frame(in_ticks, frame_ticks, "round")
+            out_ticks = _snap_to_frame(out_ticks, frame_ticks, "round")
+            if out_ticks <= in_ticks:
+                out_ticks = in_ticks + frame_ticks  # never collapse to zero length
+
+        seg_ok = False
+        last_err = None
         for attempt in range(3):  # up to 2 retries
             try:
-                # Step 1: Set in/out points around the segment via API
-                in_ticks = int(start * TICKS_PER_SECOND)
-                out_ticks = int(end * TICKS_PER_SECOND)
                 command = createCommand("setSequenceInOutPoints", {
                     "sequenceId": sequence_id,
                     "inPointTicks": in_ticks,
@@ -1560,39 +2063,179 @@ def remove_silence_segments(sequence_id: str, silence_segments: list):
                 sendCommand(command)
                 time.sleep(0.5)
 
-                # Step 2: Extract (ripple delete marked range).
-                # Premiere Pro's default Extract shortcut is apostrophe (key code 39).
-                # Avoid activating on every cut; activation can hang while Premiere is busy.
+                # Extract (ripple delete the marked range). Premiere's default
+                # Extract shortcut is apostrophe = macOS key code 39.
                 _send_key_code_fast(39)
                 time.sleep(1.5)
 
-                results.append({"start": start, "end": end, "success": True})
-                succeeded += 1
                 seg_ok = True
                 break
             except Exception as e:
+                last_err = str(e)
                 if attempt < 2:
                     time.sleep(1.0 * (attempt + 1))
-                else:
-                    results.append({"start": start, "end": end, "success": False, "error": str(e)})
-                    failed += 1
 
-    return {
+        if seg_ok:
+            succeeded += 1
+            expected_removed_ticks += (out_ticks - in_ticks)
+            results.append({
+                "start": start, "end": end,
+                "inTicks": in_ticks, "outTicks": out_ticks, "success": True,
+            })
+        else:
+            failed += 1
+            results.append({"start": start, "end": end, "success": False, "error": last_err})
+
+    out = {
         "action": "remove_silence_segments",
         "processed": len(sorted_segments),
         "succeeded": succeeded,
         "failed": failed,
-        "results": results
+        "frameSnapped": bool(frame_snap and frame_ticks),
+        "activeSequenceConfirmed": not active_unconfirmed,
+        "results": results,
+        "verified": None,
+        "verification": None,
     }
+
+    if verify:
+        verification = _verify_cut(
+            sequence_id, before_summary, expected_removed_ticks, frame_ticks,
+            cut_count=succeeded,
+        )
+        out["verification"] = verification
+        out["verified"] = verification.get("verified")
+        # Surface the two facts the user explicitly cares about at the top level
+        # so callers don't have to dig into the verification block.
+        out["packed"] = verification.get("packed")
+        out["avSynced"] = verification.get("avSynced")
+        out["nextSteps"] = _cut_next_steps(verification, sequence_id)
+
+    return out
+
+
+def _cut_next_steps(verification: dict, sequence_id: str) -> list:
+    """Plain next-step instructions for the user, derived from verification.
+
+    The user asked to be told exactly what to do next, then have it re-checked.
+    """
+    if not verification:
+        return []
+    if verification.get("verified") and verification.get("packed") and verification.get("avSynced"):
+        return [
+            "Cut verified: back to back, audio in sync, expected amount removed.",
+            "Finish the edit in Premiere (color, audio polish, b-roll). Save when done.",
+        ]
+    steps = []
+    if verification.get("verified") is None:
+        steps.append(
+            "Verification could not read the layout back — re-run "
+            f"verify_sequence_layout('{sequence_id}') and inspect manually before trusting the cut."
+        )
+        return steps
+    if verification.get("avSynced") is False:
+        steps.append(
+            "AUDIO/VIDEO OUT OF SYNC. In Premiere, undo the last Extract (Cmd+Z), confirm "
+            "Linked Selection is ON and that BOTH the video and its audio track are targeted, "
+            "then re-run the cut. Do not close gaps with move/trim."
+        )
+    if verification.get("newGapsIntroduced"):
+        steps.append(
+            "A gap opened (clips not back to back). Undo (Cmd+Z) and re-cut with Extract "
+            "(not Lift/Delete); do not patch the gap with set_clip_position/trim."
+        )
+    elif verification.get("packed") is False:
+        steps.append(
+            "A pre-existing gap remains elsewhere. Click into it and ripple-delete it "
+            f"(or report it). Then re-run verify_sequence_layout('{sequence_id}')."
+        )
+    if verification.get("verified") is False and not steps:
+        steps.append(
+            f"Cut not confirmed — run verify_sequence_layout('{sequence_id}') and inspect "
+            "the warnings before continuing."
+        )
+    steps.append(f"After fixing, re-run verify_sequence_layout('{sequence_id}') to re-validate.")
+    return steps
 
 
 @mcp.tool()
+def verify_sequence_layout(sequence_id: str):
+    """
+    Inspect the live sequence and report clip counts, duration, gaps, and A/V skew.
+
+    This is the verification harness for the cutting workflow. It reads the ACTUAL
+    clip layout from Premiere (never a tool's success flag) so you can confirm a
+    cut really applied and that the timeline is packed with no gaps.
+
+    Args:
+        sequence_id (str): The id of the sequence to inspect.
+
+    Returns a dict with:
+        - videoClipCount / audioClipCount
+        - durationSeconds
+        - gaps: list of remaining gaps, per media-lane, INCLUDING a leading gap
+          before the first clip (kind, trackIndex, leading, start/end, gapSeconds,
+          gapFrames)
+        - packed: True when zero gaps remain on any lane (fully back to back)
+        - avMisalignments: cut junctions where video and audio do NOT line up
+          within one frame (empty == frame-accurate sync)
+        - videoAudioInSync: True when there are no misalignments AND the ends are
+          within ~2 frames
+        - warnings: plain-language problems, if any
+    """
+    layout = _fetch_layout(sequence_id)
+    summary = _summarize_layout(layout)
+    video, audio = _clips_from_layout(layout)
+    summary["sequenceId"] = layout.get("id")
+    summary["sequenceName"] = layout.get("name")
+    summary["packed"] = summary["gapCount"] == 0
+
+    ft = summary.get("frameTicks") or int(TICKS_PER_SECOND / 24)
+
+    # Frame-accurate A/V sync: every internal cut must land on the same timecode
+    # for video and audio. This is the precise "audio drifted a frame" check.
+    misalignments = _av_misalignments(video, audio, ft) if (video and audio) else []
+    summary["avMisalignments"] = misalignments
+
+    skew = abs(summary["videoEndTicks"] - summary["audioEndTicks"])
+    summary["videoAudioEndSkewSeconds"] = round(skew / TICKS_PER_SECOND, 4)
+    summary["videoAudioInSync"] = (not misalignments) and (skew <= 2 * ft)
+
+    warnings = []
+    if not summary["packed"]:
+        leading = [g for g in summary["gaps"] if g.get("leading")]
+        if leading:
+            warnings.append(
+                f"{len(leading)} clip lane(s) do not start at 0 — there is a gap "
+                "before the first clip; the sequence is not back to back."
+            )
+        inter = summary["gapCount"] - len(leading)
+        if inter > 0:
+            warnings.append(f"{inter} gap(s) between clips — clips are not back to back.")
+    if misalignments:
+        spots = ", ".join(f"{m['side']}@{m['seconds']}s" for m in misalignments[:6])
+        warnings.append(
+            f"AUDIO/VIDEO OUT OF SYNC at {len(misalignments)} cut point(s): {spots}. "
+            "A cut landed on a different frame for video vs audio."
+        )
+    elif not summary["videoAudioInSync"]:
+        warnings.append(
+            f"Video and audio ends differ by {summary['videoAudioEndSkewSeconds']}s "
+            "(> 2 frames) — possible A/V desync at the tail."
+        )
+    summary["warnings"] = warnings
+    return summary
+
+
+# RETIRED: not registered as an MCP tool. This cut-then-ripple approach could
+# desync video/audio and was never verified. Kept only for reference; use
+# remove_silence_segments (which Extracts and verifies). Do not re-add @mcp.tool().
 def cut_and_ripple_delete_at_times(sequence_id: str, times_seconds: list, video_track_index: int = 0, audio_track_index: int = 0):
     """
-    DEPRECATED: Use remove_silence_segments instead for removing sections.
+    RETIRED — not exposed as a tool. Use remove_silence_segments instead.
 
     This function cuts at each time and immediately ripple deletes, which may not work
-    as expected. Use remove_silence_segments with start/end pairs instead.
+    as expected and can desync linked audio/video.
     """
     TICKS_PER_SECOND = 254016000000
     sorted_times = sorted(times_seconds, reverse=True)

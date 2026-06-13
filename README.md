@@ -52,7 +52,7 @@ Sources:
 ```text
 apps/premiere/
 ├── adobe-mcp/              # Premiere MCP server, proxy, and UXP plugin
-├── scripts/                # Premiere ExtendScript helpers kept for explicit use
+├── scripts/                # legacy-extendscript/ — quarantined .jsx, reference only
 └── skills/                 # Repo-local editing workflow instructions
 
 .agents/                   # Durable agent context and memory

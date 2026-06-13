@@ -380,3 +380,39 @@ def insert_mogrt(
     if insert_time_ticks:
         options["insertTimeTicks"] = insert_time_ticks
     return run_command("insertMogrt", options)
+
+
+def get_sequence_layout(sequence_id: str) -> dict:
+    """Get a focused single-sequence clip layout plus its frame rate.
+
+    Lighter than getFullProjectData (which walks every sequence). Returns
+    {id, name, frameRateValue, ticksPerFrame, videoTracks, audioTracks}.
+    """
+    return run_command("getSequenceLayout", {"sequenceId": sequence_id})
+
+
+def add_effect_with_params(
+    sequence_id: str,
+    video_track_index: int,
+    track_item_index: int,
+    effect_match_name: str,
+    properties: list | None = None,
+) -> dict:
+    """Add a video effect (by match name) to a clip and set params by name.
+
+    Unknown parameter names are skipped rather than raised. The response
+    reports applied vs skipped params plus the component's available parameter
+    display names, so the exact param names for this Premiere version can be
+    discovered and re-applied. ``properties`` is a list of
+    {"name": <display name>, "value": <number>} entries.
+    """
+    return run_command(
+        "addEffectWithParams",
+        {
+            "sequenceId": sequence_id,
+            "videoTrackIndex": video_track_index,
+            "trackItemIndex": track_item_index,
+            "effectName": effect_match_name,
+            "properties": properties or [],
+        },
+    )

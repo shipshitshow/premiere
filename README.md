@@ -1,132 +1,147 @@
 # Adobe Premiere MCP Editor
 
-This repo is for editing inside Adobe Premiere Pro through a local MCP server,
-proxy, and Premiere UXP plugin. The source of truth is the open Premiere
-project and the active Premiere sequence.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Premiere MCP Check](https://github.com/shipshitshow/premiere/actions/workflows/ci.yml/badge.svg)](https://github.com/shipshitshow/premiere/actions/workflows/ci.yml)
 
-This is not a standalone video editor, not a generated replacement timeline,
-and not a Python/FFmpeg rendering pipeline. The old self-editing app has been
-removed from the working tree; git history is the archive.
+Transcript-driven editing for the **live Adobe Premiere Pro timeline**, through a
+local MCP server + Socket.IO proxy + Premiere UXP plugin. An MCP-capable agent
+removes dead filler from a sequence and **every cut is verified** for A/V sync,
+missing frames, and back-to-back packing before it is trusted.
 
-## What This Repo Does
+Built and used by the [**Ship Sh!t Show**](https://www.youtube.com/@shipshitshow)
+to cut technical livestreams down to publishable videos.
 
-- exposes an `adobe-premiere` MCP server to MCP-capable agents
-- connects that server to Premiere through a local Socket.IO proxy
-- loads a Premiere UXP plugin that executes commands inside Premiere Pro
-- edits the active sequence in the Premiere UI
-- keeps repo-local workflow rules for transcript-driven cuts and safe recovery
+> The active Premiere sequence is the source of truth. This is **not** a
+> standalone editor, a generated replacement timeline, or an FFmpeg render
+> pipeline. It drives the real Premiere UI and then reads the result back to
+> confirm what actually happened.
 
-The default transcript/cut workflow is `remove_silence_segments`: set in/out
-points on the active sequence, use Premiere's native Extract command, then
-verify the sequence layout changed.
+## Why this exists
 
-## Current Adobe Status
+Cutting a 3-hour livestream by transcript is easy to get subtly wrong: a cut that
+leaves video and audio off by a single frame, a gap that breaks "back to back," or
+a tool that reports success while the timeline never changed. Those failures are
+invisible until you scrub the export.
 
-Checked on June 13, 2026:
+So the point of this repo is not tool count — it is the **verification layer**.
+The one supported cut path frame-snaps every range, cuts with Premiere's native
+**Extract** (which closes the gap in the same A/V-synced operation), and then
+re-reads the sequence to prove the edit landed correctly.
 
-- Adobe has official MCP work, but the public first-party MCP servers I found
-  are for products like Adobe Express Developer docs, Adobe Target, AEM, App
-  Builder, and design/dev resources. I did not find an official Adobe Premiere
-  Pro editing MCP server.
-- Premiere itself has moved forward: Adobe says UXP is officially available in
-  Premiere Pro 25.6, and the Premiere UXP API now covers projects, sequences,
-  tracks, clips, markers, project items, and application settings.
-- Adobe's official Premiere UXP samples now cover import/export, encoder,
-  transcripts, effects, transitions, keyframes, markers, source monitor, and
-  project conversion formats. That means our least-hacky path is to keep
-  expanding direct UXP-backed MCP commands, not revive a separate editor app.
-- Premiere Pro 26.2 adds UXP Hybrid Plugins, which may be useful later for
-  native media analysis or high-performance operations, but it is not needed
-  for normal timeline editing.
+## What it does
 
-Sources:
-[Adobe Express Developer MCP](https://developer.adobe.com/express/add-ons/docs/guides/getting-started/local-development/mcp-server),
-[Adobe Target MCP](https://experienceleague.adobe.com/en/docs/target/using/integrate/mcp/target-mcp-get-started),
-[Premiere UXP API](https://developer.adobe.com/premiere-pro/uxp/),
-[Premiere UXP Changelog](https://developer.adobe.com/premiere-pro/uxp/changelog/),
-[Premiere UXP Samples](https://github.com/AdobeDocs/uxp-premiere-pro-samples),
-[UXP Hybrid Plugins for Premiere](https://blog.developer.adobe.com/en/publish/2026/04/uxp-hybrid-plugins-now-available-for-premiere).
+- Exposes an `adobe-premiere` MCP server to MCP-capable agents (Claude Code, etc.)
+- Connects that server to Premiere through a local Socket.IO proxy (`localhost:3001`)
+- Loads a Premiere UXP plugin that runs commands inside Premiere Pro
+- Edits the **active sequence** in the live Premiere UI
+- Verifies every transcript cut and reports the real state, not just a success flag
+
+## The supported workflow: `remove_silence_segments`
+
+This is the only safe cut primitive. Give it the active sequence id and removal
+ranges (in source-timeline seconds); for each range it:
+
+1. **Confirms focus** — makes the target sequence active and refuses to cut if it
+   cannot confirm it (the Extract keystroke lands on whatever timeline is focused).
+2. **Frame-snaps** the range so video and audio cut on the exact same frame.
+3. **Extracts** the range with Premiere's native ripple-delete, which closes the
+   gap in the same A/V-synced op — the "regroup," done natively per cut.
+4. **Verifies** the result and returns it.
+
+### Verification contract
+
+After a cut, read the top-level flags:
+
+| Flag | Meaning |
+|------|---------|
+| `verified` | The right amount was removed, no new gap appeared, and every cut lands on the same frame for video and audio. |
+| `packed` | The whole sequence is back to back — zero gaps on any lane (including a leading gap). |
+| `avSynced` | Video and audio cut at the same timecode everywhere (frame-accurate). |
+| `nextSteps` | Plain instructions for the user when something needs attention. |
+
+Treat `verified: false` / `null` as **not confirmed**. The A/V check tolerates
+only sub-frame rounding (half a frame) — a full one-frame drift is reported as a
+misalignment and fails `verified`/`avSynced`. Standalone helpers:
+
+- `verify_sequence_layout` — per-lane gaps, `avMisalignments`, end-skew, warnings.
+- `get_sequence_frame_image` — returns the frame at a timestamp as an inline image
+  (read-only) so you can *see* a cut junction, on top of the numbers.
+
+> Never trust an MCP success response on its own. Re-read the layout.
 
 ## Layout
 
 ```text
 apps/premiere/
 ├── adobe-mcp/              # Premiere MCP server, proxy, and UXP plugin
+│   ├── adobe_mcp/premiere/ # MCP server + tools (server.py, tools.py)
+│   ├── proxy-server/       # Socket.IO proxy (localhost:3001)
+│   └── uxp-plugins/premiere/ # UXP plugin executed inside Premiere
 ├── scripts/                # legacy-extendscript/ — quarantined .jsx, reference only
 └── skills/                 # Repo-local editing workflow instructions
 
-.agents/                   # Durable agent context and memory
-.claude/                   # Claude MCP config
-.codex/                    # Codex MCP config
-.mcp.json                  # MCP config for compatible clients
+.agents/                    # Durable agent context and memory
+.claude/  .codex/  .mcp.json # MCP client configs (point at ./.venv/bin/adobe-premiere)
 ```
 
-Only Premiere lives under `apps/premiere`. Photoshop, Illustrator, InDesign,
-the legacy Python app, generic Windows launch menus, and unused icon assets have
-been removed.
+Only Premiere lives under `apps/premiere`. Photoshop, Illustrator, InDesign, and
+the old self-editing Python app were removed; git history is the archive.
 
 ## Setup
 
-Install the MCP package into the repo virtual environment:
+Requires Adobe Premiere Pro with UXP support (25.6+), Python, and Bun.
 
 ```bash
+# 1. Install the MCP package into the repo virtual environment
 cd apps/premiere/adobe-mcp
 pip install -e .
-```
 
-Install proxy dependencies:
-
-```bash
-cd apps/premiere/adobe-mcp/proxy-server
+# 2. Install proxy dependencies
+cd proxy-server
 npm install
 ```
 
-Load the Premiere UXP plugin in Adobe UXP Developer Tools from:
-
-```text
-apps/premiere/adobe-mcp/uxp-plugins/premiere
-```
-
-Start the proxy from the repo root:
+Load the Premiere UXP plugin in Adobe UXP Developer Tools from
+`apps/premiere/adobe-mcp/uxp-plugins/premiere`, then start the proxy from the
+repo root:
 
 ```bash
 bun run premiere:proxy
 ```
 
-The MCP server command is:
+The MCP server command (already wired into `.mcp.json` / `.claude` / `.codex`) is
+`./.venv/bin/adobe-premiere`, with `PROXY_URL=http://localhost:3001`.
 
-```text
-./.venv/bin/adobe-premiere
-```
+## Safety rules
 
-## MCP Commands
-
-Core live-edit tools include project and sequence inspection, import, sequence
-creation, trim, clip delete/duplicate/move, markers, effects, transitions,
-keyframes, selection, transcript import/export, MOGRT insertion, export, and
-keyboard-backed Premiere actions.
-
-Use `remove_silence_segments` for transcript-based deletions. Avoid
-`set_clip_position` for closing gaps, and do not use split/delete fallback tools
-for linked audio/video cuts unless the user explicitly asks for recovery work.
-
-## Safety Rules
-
-- Edit the active Premiere sequence, then verify it.
-- Treat MCP success responses as untrusted until the clip layout actually changes.
-- Stop on uncertain focus, wrong sequence, proxy disconnect, or failed verification.
-- Do not create replacement timelines, rendered proxy edits, or alternate Python
+- Edit the active Premiere sequence, then verify it — success flags are untrusted
+  until the clip layout actually changes.
+- Use `remove_silence_segments` for transcript cuts. Do **not** use
+  split/trim/delete fallbacks or `set_clip_position` to close gaps — they desync
+  linked audio/video. (They exist in the server, inherited from upstream, but
+  carry an `UNSAFE` docstring and are not part of the cut workflow.)
+- Do not create replacement timelines, rendered proxy edits, or alternate
   assemblies unless explicitly asked.
-- Keep this repo focused on Premiere MCP/UXP work only.
+- Stop on uncertain focus, wrong sequence, proxy disconnect, or failed verification.
 
 ## Checks
 
-Headless checks cover syntax and repo hygiene:
-
 ```bash
-bun run premiere:check
-bun run format:check
+bun run premiere:check     # Python syntax / repo hygiene
+bun run format:check       # Biome formatting
 ```
 
-Live editing behavior still requires Premiere Pro, the proxy server, and the UXP
-plugin to be running.
+Live editing behavior requires Premiere Pro, the proxy server, and the UXP plugin
+to be running.
+
+## Credits
+
+Derived from the open-source [`adobe-mcp`](https://github.com/mikechambers/adb-mcp)
+project by **Mike Chambers** (MIT). The MCP server, proxy, and UXP plugin
+architecture come from that project; this repo focuses it on Premiere and adds the
+hardened, verification-first transcript-cut workflow.
+
+## License
+
+[MIT](LICENSE). Bundled components retain their own notices
+(`apps/premiere/adobe-mcp/LICENSE` — MIT; the UXP plugin — Apache 2.0).

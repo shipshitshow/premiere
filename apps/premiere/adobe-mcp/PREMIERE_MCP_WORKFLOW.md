@@ -89,7 +89,9 @@ Relevant files:
    content), `newGapsIntroduced`, `residualGaps`, and `avMisalignments` (each cut
    where V/A diverge by ≥1 frame). Treat `verified: false`/`null` as NOT confirmed.
 6. Re-inspect with `verify_sequence_layout` if anything is uncertain — it returns
-   the same `packed` / `avMisalignments` / `videoAudioInSync` / `warnings`.
+   the same `packed` / `avMisalignments` / `videoAudioInSync` / `warnings`. For a
+   visual check, `get_sequence_frame_image(sequence_id, seconds)` returns the frame
+   at a timestamp as an inline image (read-only) so you can see a cut junction.
 7. Stop if the tool reports success but the clip layout is unchanged, or if any
    residual gap / A/V misalignment is reported. Hand the user the `nextSteps`.
 

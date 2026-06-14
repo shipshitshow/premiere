@@ -20,13 +20,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 from ..shared import init, sendCommand, createCommand, socket_client
 import sys
 import os
 import subprocess
 import time
 import math
+import io
+import glob
+import uuid
+import tempfile
 
 # Premiere uses 254016000000 ticks per second internally.
 TICKS_PER_SECOND = 254016000000
@@ -877,6 +881,97 @@ def export_frame(sequence_id:str, file_path: str, seconds: int):
     )
 
     return sendCommand(command)
+
+
+def _encode_frame_png(path: str, max_dimension: int = 1280) -> bytes:
+    """Read a PNG from disk and, if it is larger than max_dimension on its
+    longest edge, downscale it (preserving aspect) to keep the returned image
+    cheap in tokens. max_dimension <= 0 returns the original bytes untouched.
+    Falls back to the raw bytes if Pillow is unavailable or decoding fails."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    if not max_dimension or max_dimension <= 0:
+        return raw
+    try:
+        from PIL import Image as _PILImage
+        with _PILImage.open(io.BytesIO(raw)) as im:
+            width, height = im.size
+            longest = max(width, height)
+            if longest <= max_dimension:
+                return raw
+            scale = max_dimension / float(longest)
+            new_size = (max(1, int(round(width * scale))), max(1, int(round(height * scale))))
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGB")
+            resized = im.resize(new_size, _PILImage.LANCZOS)
+            buf = io.BytesIO()
+            resized.save(buf, format="PNG")
+            return buf.getvalue()
+    except Exception:
+        return raw
+
+
+@mcp.tool()
+def get_sequence_frame_image(sequence_id: str, seconds: float, max_dimension: int = 1280):
+    """Captures the frame at `seconds` and returns it to you as an inline image so
+    you can VISUALLY confirm a cut junction after a transcript Extract — the right
+    content is on screen, the expected frame is present, nothing duplicated or
+    dropped. Use this alongside the numeric checks from verify_sequence_layout /
+    remove_silence_segments (A/V sync, gaps, removed-frame deltas) when you want to
+    actually see the result, not just read the metrics.
+
+    Read-only: it does NOT modify the timeline. Unlike export_frame (which only
+    writes a PNG to disk and returns the path), this returns the actual pixels.
+
+    Args:
+        sequence_id (str): The id of the sequence to capture from.
+        seconds (float): Timestamp in seconds from the start of the sequence.
+            Fractional / tick-precise values are supported, so you can land
+            exactly on a cut-junction frame for inspection.
+        max_dimension (int): Longest-edge pixel cap for the returned image; the
+            frame is downscaled to fit (preserving aspect) to control token cost.
+            Defaults to 1280. Set to 0 to return the frame at full sequence
+            resolution.
+    """
+    tmp_dir = tempfile.gettempdir()
+    base = "premiere_frame_%s" % uuid.uuid4().hex
+    # Pass a base path WITHOUT an extension: the UXP exportFrame handler appends
+    # ".png" itself, and its path reconstruction doubles the extension if one is
+    # already present. We glob the result by unique prefix instead of trusting an
+    # exact returned path.
+    request_path = os.path.join(tmp_dir, base)
+
+    command = createCommand("exportFrame", {
+        "sequenceId": sequence_id,
+        "filePath": request_path,
+        "seconds": seconds,
+    })
+    result = sendCommand(command)
+
+    candidates = sorted(
+        p for p in glob.glob(os.path.join(tmp_dir, base + "*")) if os.path.isfile(p)
+    )
+    if not candidates:
+        return {
+            "error": "frame_export_failed",
+            "detail": "Premiere did not write a frame PNG; cannot return an image. "
+                      "Confirm the sequence is active and the proxy/plugin are connected.",
+            "sequenceId": sequence_id,
+            "seconds": seconds,
+            "commandResult": result,
+        }
+
+    out_path = candidates[0]
+    try:
+        data = _encode_frame_png(out_path, max_dimension)
+    finally:
+        for p in candidates:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+    return Image(data=data, format="png")
 
 
 @mcp.tool()
@@ -2273,106 +2368,125 @@ def get_instructions() -> str:
     """Read this first! Returns information and instructions on how to use Premiere Pro and this API"""
 
     return f"""
-    You are a Premiere Pro and video expert who is creative and loves to help other people learn to use Premiere and create.
+    You are a Premiere Pro and video expert. This workspace edits the LIVE active
+    Premiere Pro sequence through Adobe MCP. The live sequence is the source of
+    truth — never assume an edit landed just because a tool returned success;
+    re-read the layout with verify_sequence_layout.
 
     Rules to follow:
 
-    1. Think deeply about how to solve the task
-    2. Always check your work
-    3. Read the info for the API calls to make sure you understand the requirements and arguments
-    4. In general, add clips first, then effects, then transitions
-    5. As a general rule keep transitions short (no more that 2 seconds is a good rule), and there should not be a gap between clips (or else the transition may not work)
+    1. Think deeply about how to solve the task.
+    2. Always check your work against the actual sequence layout — not the success flag.
+    3. Read the API call docstrings so you understand the requirements and arguments.
+    4. When building from scratch: add clips first, then effects, then transitions.
+    5. Keep transitions short (<= 2 seconds), and there must be no gap between clips
+       (or the transition may not work).
 
-    IMPORTANT: To create a new project and add clips:
-    1. Create new project (create_project)
-    2. Add media to the project (import_media)
-    3. Create a new sequence with media (should always add video / image clips before audio.(create_sequence_from_media). This will create a sequence with the clips.
-    4. The first clip you add will determine the dimensions / resolution of the sequence
+    ====================================================================
+    PRIMARY WORKFLOW: TRANSCRIPT / SILENCE REMOVAL (the supported path)
+    ====================================================================
+
+    Removing dead filler from a transcript is done with ONE tool:
+
+        remove_silence_segments(sequence_id, silence_segments)
+
+    It is the only safe cut primitive. For each removal range it:
+    - asserts the target sequence IS the active/focused timeline (it calls
+      setActiveSequence first; if it cannot confirm, it REFUSES and returns
+      nextSteps, because the cut keystroke lands on whatever timeline is focused),
+    - frame-snaps the range so video and audio cut on the exact same frame,
+    - removes the range with Premiere's native Extract (ripple-delete), which
+      closes the gap in the SAME A/V-synced op (this is the "regroup" — there is
+      no separate gap-closing step, and none is allowed),
+    - processes ranges end -> start so earlier timecodes stay valid,
+    - then auto-verifies the result.
+
+    After it runs, read the top-level flags:
+    - verified  — true only when the right amount was removed, NO new gap appeared,
+                  and every cut lands on the same frame for video and audio.
+    - packed    — true when the whole sequence is back to back (zero gaps on any
+                  lane, including a leading gap before the first clip).
+    - avSynced  — true when video and audio cut at the same timecode everywhere.
+    - nextSteps — plain instructions for the user when something needs attention.
+    Treat verified: false / null as NOT confirmed. Re-inspect with
+    verify_sequence_layout. You can also capture get_sequence_frame_image at a cut
+    junction to SEE that the right frame is present and nothing is duplicated/dropped.
+
+    DO NOT use the following for transcript cuts — they desync linked video/audio
+    and/or leave gaps, and all carry an UNSAFE docstring prefix:
+      split_video_clip, split_audio_clip, batch_split_clips,
+      trim_video_clip, trim_audio_clip,
+      remove_video_clip_range, remove_linked_clip_range, remove_clips (ripple),
+      delete_clip, cut_at_playhead, ripple_delete,
+      set_clip_position (can stretch clips; never use it to close gaps).
+    Never close a residual gap with split/trim/delete/set_clip_position. If a gap
+    remains after a cut, STOP and report it for manual packing with its location
+    from the verification block.
+
+    Do not create alternate sequences, rendered MP4 assemblies, FFmpeg proxy cuts,
+    or API-built replacement timelines unless the user explicitly asks.
 
     AVAILABLE TOOLS:
 
+    Verification (use these to confirm every edit):
+    - verify_sequence_layout - per-lane gaps, packed, avMisalignments, end-skew, warnings
+    - get_sequence_frame_image - return the frame at a timestamp as an inline image
+      (visual cut-junction check; read-only)
+    - get_full_project_data, get_project_info, get_sequence_settings, get_clip_info
+
+    Transcript editing (the supported cut path):
+    - remove_silence_segments - the ONLY safe cut tool (Extract + frame-snap + verify)
+    - import/export transcript helpers (premiere_* tools)
+
     Project Management:
     - create_project, open_project, save_project, save_project_as
-    - get_project_info
 
     Sequence Management:
     - create_sequence_from_media, set_active_sequence
-    - get_sequence_settings
 
     Media & Timeline:
     - import_media - import files into project
     - add_media_to_sequence - add clips to timeline
 
-    Clip Editing:
-    - split_video_clip, split_audio_clip - split clips at a specific time
-    - trim_video_clip, trim_audio_clip - adjust in/out points and timeline position
-    - remove_video_clip_range - remove a section from a clip (for silence removal)
-    - remove_clips - delete clips from timeline (with optional ripple)
-    - delete_clip - delete a single clip WITHOUT ripple (track-specific, leaves gaps)
-    - get_clip_info - get detailed info about a clip (start, end, duration, in/out points)
-    - duplicate_clip - clone a clip
-    - move_clip - reposition clips on timeline (relative)
-    - set_clip_position - move clip to absolute position
-    - rename_clip - change clip name
-    - set_video_clip_disabled, set_audio_clip_disabled - enable/disable clips
-
     Effects & Transitions:
     - add_black_and_white_effect, add_gaussian_blur_effect, add_tint_effect, add_motion_blur_effect
     - append_video_transition - add transitions between clips
     - set_video_clip_properties - opacity and blend mode
+    - premiere_apply_lumetri_correction, premiere_clean_audio_pipeline (manual-finish helpers)
 
     Audio:
     - set_audio_track_mute - mute/unmute audio tracks
+    - set_video_clip_disabled, set_audio_clip_disabled - disable clips non-destructively
 
     Markers:
-    - add_marker - add markers to sequence
-    - get_markers - list all markers
-    - remove_marker - delete a marker
+    - add_marker, get_markers, remove_marker
 
     Playhead Control:
-    - get_player_position - get current playhead position
-    - set_player_position - move playhead
+    - get_player_position, set_player_position
 
     Export:
-    - export_frame - export a single frame as PNG
+    - export_frame - write a single frame to disk as PNG (returns the path)
 
     GENERAL TIPS:
 
-    Audio and Video clips are added on separate Audio / Video tracks, which you can access via their index.
+    Audio and Video clips live on separate Audio / Video tracks, accessed by index.
+    When a video clip contains audio, the audio is placed on a separate audio track.
 
-    When adding a video clip that contains audio, the audio will be placed on a separate audio track.
+    To remove unwanted material from a transcript edit, use remove_silence_segments.
+    To hide material without cutting, use set_video_clip_disabled / set_audio_clip_disabled
+    (disabled clips don't play but can be re-enabled later) — this leaves the layout
+    intact and is safe.
 
-    You can remove clips using remove_clips, or disable them using set_video_clip_disabled/set_audio_clip_disabled.
+    For a transition between two clips, the clips must be on the same track with no
+    gap between them; place the transition on the first clip.
 
-    For silence removal workflow:
-    1. Detect silence segments (external tool)
-    2. Use split_video_clip/split_audio_clip to split at silence boundaries
-    3. Use remove_clips with ripple=True to remove silent sections and close gaps
-
-    TRACK-SPECIFIC EDITING (avoiding ripple delete issues):
-    Ripple delete (Cmd+E) affects ALL unlocked tracks - this is Premiere's design.
-    To edit specific tracks without affecting others, use API-based clip management:
-
-    Workflow for editing V2/A2 without affecting V1/A1:
-    1. get_full_project_data() - see all clips and their positions
-    2. get_clip_info() - get details on specific clips
-    3. delete_clip() - remove clips WITHOUT rippling (leaves gaps)
-    4. set_clip_position() - move remaining clips into position
-
-    Alternative (non-destructive):
-    - set_video_clip_disabled() / set_audio_clip_disabled() - disable unwanted clips
-    - Disabled clips don't play but can be re-enabled later
-
-    If you want to do a transition between two clips, the clips must be on the same track and there should not be a gap between them. Place the transition on the first clip.
-
-    Video clips with a higher track index will overlap and hide those with lower index if they overlap.
-
-    When adding images to a sequence, they will have a duration of 5 seconds.
+    Video clips with a higher track index overlap and hide lower-index clips.
+    Images added to a sequence default to a 5-second duration.
 
     TIME FORMAT:
-    - All time values in the API use seconds (float)
-    - Internally Premiere uses ticks (254016000000 ticks per second)
-    - The API handles the conversion automatically
+    - All time values in the API use seconds (float).
+    - Internally Premiere uses ticks (254016000000 ticks per second).
+    - The API handles the conversion automatically.
 
     blend_modes: {", ".join(BLEND_MODES)}
     """

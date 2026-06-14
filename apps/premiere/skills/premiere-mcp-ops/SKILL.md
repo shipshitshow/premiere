@@ -85,6 +85,12 @@ server; `cut_and_ripple_delete_at_times` has been retired and is not registered)
 It is built on `verify_sequence_layout`, which you can also call standalone.
 Verification is a guardrail, not a license to trust the success flag.
 
+For a visual confirmation on top of the numbers, `get_sequence_frame_image(sequence_id,
+seconds)` returns the frame at a timestamp as an inline image (read-only — it does
+not touch the timeline). Capture it at a cut junction to see that the right content
+is on screen and nothing is duplicated or dropped. It complements, and does not
+replace, the numeric `verified`/`packed`/`avSynced` checks.
+
 The A/V check tolerates only SUB-frame rounding (half a frame). A full one-frame
 drift between video and audio is reported as a misalignment — this is the exact
 "audio drifted a frame" failure, and it fails `verified`/`avSynced`.

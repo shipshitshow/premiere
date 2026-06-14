@@ -1955,6 +1955,151 @@ const getClipInfo = async (command) => {
 }
 
 // ============================================
+// LAYOUT / VERIFICATION
+// ============================================
+
+// Returns a focused clip layout for a SINGLE sequence plus its frame rate.
+// Used by the server to verify cuts (clip boundaries -> gap/desync detection)
+// and to frame-snap removal ranges. Lighter than getFullProjectData, which
+// walks every sequence in the project.
+const getSequenceLayout = async (command) => {
+    const options = command.options
+    const id = options.sequenceId
+
+    const sequence = await _getSequenceFromId(id)
+
+    if (!sequence) {
+        throw new Error(`getSequenceLayout : Requires an active sequence.`)
+    }
+
+    const videoTracks = await getVideoTracks(sequence)
+    const audioTracks = await getAudioTracks(sequence)
+
+    // Frame rate is used to frame-snap edits and to size gap tolerances.
+    // Read it defensively across possible API shapes; callers fall back to
+    // no frame-snapping when it is unavailable.
+    let frameRateValue = null
+    let ticksPerFrame = null
+    try {
+        const settings = await sequence.getSettings()
+        const fr = await settings.getVideoFrameRate()
+        if (fr) {
+            if (typeof fr.value === "number") {
+                frameRateValue = fr.value
+            } else if (typeof fr.value === "function") {
+                frameRateValue = fr.value()
+            }
+            if (typeof fr.ticksPerFrame !== "undefined" && fr.ticksPerFrame !== null) {
+                ticksPerFrame = fr.ticksPerFrame.toString()
+            }
+        }
+    } catch (e) {
+        // optional
+    }
+
+    return {
+        id: sequence.guid.toString(),
+        name: sequence.name,
+        frameRateValue,
+        ticksPerFrame,
+        videoTracks,
+        audioTracks
+    }
+}
+
+// ============================================
+// EFFECT + PARAMS (tolerant)
+// ============================================
+
+const _findComponentByMatchName = async (trackItem, matchName) => {
+    // Search from the END of the chain backwards. addEffect appends the new
+    // component at the end, so when an effect of the same match name already
+    // exists on the clip, the LAST one is the instance we just added — returning
+    // the first (pre-existing) instance would make us configure the wrong effect.
+    const components = await trackItem.getComponentChain()
+    const count = components.getComponentCount()
+    for (let i = count - 1; i >= 0; i--) {
+        const component = components.getComponentAtIndex(i)
+        const mn = await component.getMatchName()
+        if (mn == matchName) {
+            return component
+        }
+    }
+    return null
+}
+
+// Adds a video effect (by match name) to a clip, then sets any provided params
+// by display name. Unlike appendVideoFilter, unknown params are skipped (not
+// thrown) and the response reports which params were applied/skipped plus the
+// component's available param display names. This makes effects like Lumetri
+// (whose exact param names vary by version) usable and self-documenting.
+const addEffectWithParams = async (command) => {
+    const options = command.options
+    const id = options.sequenceId
+
+    const project = await app.Project.getActiveProject()
+    const sequence = await _getSequenceFromId(id)
+
+    if (!sequence) {
+        throw new Error(`addEffectWithParams : Requires an active sequence.`)
+    }
+
+    const trackItem = await getVideoTrack(sequence, options.videoTrackIndex, options.trackItemIndex)
+    const effectName = options.effectName
+    const properties = options.properties || []
+
+    await addEffect(trackItem, effectName)
+
+    const component = await _findComponentByMatchName(trackItem, effectName)
+
+    const availableParams = []
+    if (component) {
+        const pCount = component.getParamCount()
+        for (let j = 0; j < pCount; j++) {
+            availableParams.push(component.getParam(j).displayName)
+        }
+    }
+
+    const applied = []
+    const skipped = []
+    for (const p of properties) {
+        let param = null
+        if (component) {
+            const pCount = component.getParamCount()
+            for (let j = 0; j < pCount; j++) {
+                const candidate = component.getParam(j)
+                if (candidate.displayName == p.name) {
+                    param = candidate
+                    break
+                }
+            }
+        }
+        if (!param) {
+            skipped.push(p.name)
+            continue
+        }
+        try {
+            const keyframe = await param.createKeyframe(p.value)
+            execute(() => {
+                const action = param.createSetValueAction(keyframe)
+                return [action]
+            }, project, "Set Effect Parameter")
+            applied.push(p.name)
+        } catch (e) {
+            skipped.push(p.name)
+        }
+    }
+
+    return {
+        message: "Effect added",
+        effectName,
+        availableParams,
+        appliedParams: applied,
+        skippedParams: skipped
+    }
+}
+
+// ============================================
 // EXPORT FEATURES
 // ============================================
 
@@ -2277,8 +2422,11 @@ const getEffectNames = async (command) => {
 
 const getAudioEffectNames = async (command) => {
     const filterFactory = app.AudioFilterFactory
-    const matchNames = await filterFactory.getMatchNames()
-    return { effects: matchNames }
+    // AudioFilterFactory exposes getDisplayNames() (NOT getMatchNames, which is
+    // video-only). Audio effects are added by display name via
+    // createComponentByDisplayName, so display names are what callers need.
+    const displayNames = await filterFactory.getDisplayNames()
+    return { effects: displayNames }
 }
 
 const addVideoEffect = async (command) => {
@@ -2713,6 +2861,8 @@ const commandHandlers = {
     getSequenceSettings,
     renameClip,
     getClipInfo,
+    // Layout / verification
+    getSequenceLayout,
     // Export features
     exportSequence,
     getExportFileExtension,
@@ -2733,6 +2883,7 @@ const commandHandlers = {
     getAudioEffectNames,
     addVideoEffect,
     addAudioEffect,
+    addEffectWithParams,
     removeEffect,
     getClipEffects,
     // Sequence features

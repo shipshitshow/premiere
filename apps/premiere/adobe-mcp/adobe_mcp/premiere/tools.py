@@ -9,6 +9,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .command_runner import (
     add_audio_effect,
+    add_effect_with_params,
     add_handles_to_clip,
     add_keyframe,
     add_transition_to_start,
@@ -23,6 +24,7 @@ from .command_runner import (
     get_effect_names,
     get_export_file_extension,
     get_keyframes,
+    get_sequence_layout,
     get_sequence_selection,
     get_transition_names,
     import_transcript,
@@ -33,6 +35,21 @@ from .command_runner import (
     set_sequence_in_out_points,
     set_sequence_selection,
 )
+
+
+# Lumetri Color effect match name (stable across recent Premiere versions).
+LUMETRI_MATCH_NAME = "AE.ADBE Lumetri"
+
+# Default audio-cleanup effect labels matched (case-insensitively, by substring)
+# against the live display names from getAudioEffectNames.
+DEFAULT_AUDIO_CLEANUP = ["DeNoise", "DeReverb"]
+
+
+def _unwrap(response: dict) -> dict:
+    """Pull the plugin payload out of a {response, status} proxy envelope."""
+    if isinstance(response, dict):
+        return response.get("response", response) or {}
+    return {}
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -296,6 +313,140 @@ def register_tools(mcp: FastMCP) -> None:
             video_track_index,
             audio_track_index,
         )
+
+    @mcp.tool()
+    def premiere_get_sequence_layout(sequence_id: str) -> dict:
+        """Get one sequence's clip layout (video/audio track items + frame rate).
+
+        Lighter than premiere_get_full_project_data, which walks every sequence.
+        Returns {id, name, frameRateValue, ticksPerFrame, videoTracks,
+        audioTracks}. Use this to inspect clip boundaries, count clips, or read
+        the frame rate before an edit. For POST-CUT verification prefer
+        verify_sequence_layout, which also reports residual gaps and
+        video/audio end-sync from this same data.
+        """
+        return get_sequence_layout(sequence_id)
+
+    @mcp.tool()
+    def premiere_apply_lumetri_correction(
+        sequence_id: str,
+        video_track_index: int,
+        track_item_index: int,
+        properties: list | None = None,
+    ) -> dict:
+        """Apply a Lumetri Color effect to ONE video clip and set its parameters.
+
+        This is UXP-scriptable color correction. ``properties`` is a list of
+        {"name": "<Lumetri param display name>", "value": <number>} entries.
+        Unknown parameter names are SKIPPED (not errored); the response lists
+        ``availableParams`` so you can discover the exact names for this Premiere
+        version, then re-call with the correct ones. Pass an empty list to just
+        add the effect and read back its available params.
+
+        Limitation: this sets the parameters you pass explicitly. It does NOT
+        press the Lumetri panel's "Auto" button — there is no UXP API for that.
+        To auto-balance a clip, open the Lumetri Color panel in Premiere and
+        click Auto manually.
+        """
+        result = add_effect_with_params(
+            sequence_id,
+            video_track_index,
+            track_item_index,
+            LUMETRI_MATCH_NAME,
+            properties,
+        )
+        return _unwrap(result)
+
+    @mcp.tool()
+    def premiere_clean_audio_pipeline(
+        sequence_id: str,
+        effect_labels: list | None = None,
+        audio_track_index: int | None = None,
+    ) -> dict:
+        """Apply audio-cleanup effects (DeNoise/DeReverb) across audio clips.
+
+        Fuzzy-matches ``effect_labels`` (default ["DeNoise", "DeReverb"]) against
+        the live display names from getAudioEffectNames, then adds each matched
+        effect to every audio clip in the sequence (or only the clips on
+        ``audio_track_index`` if given). Audio effects are non-destructive and
+        easy to remove, so this is reversible.
+
+        The response reports the resolved effect display names, the per-clip
+        apply results, and any labels that could not be matched. This does NOT
+        run Premiere's "Enhance Speech" (no UXP API) — it applies the standard
+        DeNoise/DeReverb audio effects. Verify the result by ear in Premiere.
+        """
+        labels = effect_labels or DEFAULT_AUDIO_CLEANUP
+
+        available = _unwrap(get_audio_effect_names()).get("effects", []) or []
+        lower_available = [(name, name.lower()) for name in available]
+
+        resolved = []
+        unmatched = []
+        for label in labels:
+            needle = label.lower()
+            # Match precedence: exact, then prefix, then the requested label is a
+            # substring of an available name. We deliberately DO NOT match when an
+            # available name is a substring of the requested label — that turned
+            # "DeReverb" into "Reverb", the OPPOSITE effect.
+            match = (
+                next((name for name, low in lower_available if low == needle), None)
+                or next((name for name, low in lower_available if low.startswith(needle)), None)
+                or next((name for name, low in lower_available if needle in low), None)
+            )
+            if match:
+                resolved.append(match)
+            else:
+                unmatched.append(label)
+
+        layout = _unwrap(get_sequence_layout(sequence_id))
+        audio_tracks = layout.get("audioTracks", []) or []
+
+        applied = []
+        errors = []
+        clip_count = 0
+        for track in audio_tracks:
+            t_index = track.get("index")
+            if audio_track_index is not None and t_index != audio_track_index:
+                continue
+            for clip in track.get("tracks", []) or []:
+                clip_count += 1
+                c_index = clip.get("index")
+                for effect_name in resolved:
+                    try:
+                        add_audio_effect(sequence_id, t_index, c_index, effect_name)
+                        applied.append(
+                            {
+                                "audioTrackIndex": t_index,
+                                "clipIndex": c_index,
+                                "effect": effect_name,
+                            }
+                        )
+                    except Exception as exc:  # report, do not abort the batch
+                        errors.append(
+                            {
+                                "audioTrackIndex": t_index,
+                                "clipIndex": c_index,
+                                "effect": effect_name,
+                                "error": str(exc),
+                            }
+                        )
+
+        return {
+            "action": "clean_audio_pipeline",
+            "requestedLabels": labels,
+            "resolvedEffects": resolved,
+            "unmatchedLabels": unmatched,
+            "availableAudioEffects": available,
+            "audioClipCount": clip_count,
+            "appliedCount": len(applied),
+            "applied": applied,
+            "errors": errors,
+            "note": (
+                "Audio effects added but not verified by playback. "
+                "Confirm the result by ear in Premiere."
+            ),
+        }
 
 
 def create_premiere_tools_server(name: str = "Premiere Tools") -> FastMCP:

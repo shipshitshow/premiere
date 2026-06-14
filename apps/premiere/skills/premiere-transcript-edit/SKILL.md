@@ -40,7 +40,24 @@ Ignore empty `text` values and disfluency-only filler entries when planning.
 3. Build a keep-plan with section labels and source ranges.
 4. Tighten the selection to hit the requested runtime.
 5. Convert keep ranges into removal ranges.
-6. If the user wants execution and Premiere MCP is available, hand off the removal ranges to the Premiere cutting workflow.
+6. If the user wants execution and Premiere MCP is available, hand off the removal
+   ranges to the Premiere cutting workflow.
+
+## End-to-end execution (after approval)
+
+This is the supported one-call path. The user does not touch the Premiere UI to
+cut or to close gaps:
+
+1. Get user approval on the removal ranges (planning and execution are separate).
+2. Call `remove_silence_segments(sequence_id, removal_ranges)`. It cuts each range
+   with Premiere's Extract (ripple-delete), which **regroups** by closing the gap
+   in the same A/V-synced op, frame-snaps to avoid 1-frame gaps, and verifies.
+3. Confirm `verified: true` with zero residual gaps. If `verified` is false/null,
+   report the real layout (`verify_sequence_layout`) and stop — do not paper over it.
+4. Hand back to the user to finish manually. Optional UXP-scriptable finishing
+   helpers: `premiere_apply_lumetri_correction` (color), `premiere_clean_audio_pipeline`
+   (DeNoise/DeReverb). The Lumetri "Auto" button, adjustment layers, and "Enhance
+   Speech" have no UXP API and stay manual.
 
 ## Output Shape
 

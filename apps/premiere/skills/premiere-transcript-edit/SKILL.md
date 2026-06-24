@@ -45,15 +45,19 @@ Ignore empty `text` values and disfluency-only filler entries when planning.
 
 ## End-to-end execution (after approval)
 
-This is the supported one-call path. The user does not touch the Premiere UI to
-cut or to close gaps:
+This is the supported one-call path. The user does not manually edit the
+Premiere timeline to cut or to close gaps:
 
 1. Get user approval on the removal ranges (planning and execution are separate).
 2. Call `remove_silence_segments(sequence_id, removal_ranges)`. It cuts each range
-   with Premiere's Extract (ripple-delete), which **regroups** by closing the gap
-   in the same A/V-synced op, frame-snaps to avoid 1-frame gaps, and verifies.
-3. Confirm `verified: true` with zero residual gaps. If `verified` is false/null,
-   report the real layout (`verify_sequence_layout`) and stop — do not paper over it.
+   with Premiere's Extract (ripple-delete), which normally **regroups** by closing
+   the gap in the same A/V-synced op, frame-snaps to avoid 1-frame gaps, and
+   verifies.
+3. Confirm `verified: true` with zero residual gaps. If Premiere/UXP returned no
+   frame ticks and Extract left only tiny native gaps, hand off to the Premiere
+   MCP ops native Close Gap recovery and verify after every pass. For any other
+   `verified: false`/`null` result, report the real layout
+   (`verify_sequence_layout`) and stop — do not paper over it.
 4. Hand back to the user to finish manually. Optional UXP-scriptable finishing
    helpers: `premiere_apply_lumetri_correction` (color), `premiere_clean_audio_pipeline`
    (DeNoise/DeReverb). The Lumetri "Auto" button, adjustment layers, and "Enhance

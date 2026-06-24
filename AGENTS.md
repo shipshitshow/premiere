@@ -20,10 +20,14 @@ This repo is an Adobe Premiere MCP editor workspace. The active product is
 
 - The live Premiere Pro timeline is the source of truth.
 - Use `remove_silence_segments` for transcript-based removal ranges. It cuts with
-  Premiere's Extract (ripple-delete), which closes the gap in the same A/V-synced
-  op, then verifies the layout and returns a `verified` flag.
+  Premiere's Extract (ripple-delete), which normally closes the gap in the same
+  A/V-synced op, then verifies the layout and returns a `verified` flag.
 - Verify real sequence changes after every cut batch. Treat `verified: false` or
   `verified: null` as NOT confirmed — re-inspect with `verify_sequence_layout`.
+- If Premiere/UXP returns no frame ticks and Extract leaves only tiny native
+  gaps, use the documented native Close Gap recovery (`W`) one pass at a time,
+  verifying after every pass. Keep the cut only when packed and A/V sync both
+  verify clean; otherwise undo to the previous clean baseline and stop.
 - Stop on uncertain focus, wrong sequence, failed verification, or unsafe fallback.
 - Do not create alternate sequences, rendered assemblies, or proxy edits unless
   the user explicitly asks for them.

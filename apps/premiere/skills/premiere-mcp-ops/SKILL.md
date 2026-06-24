@@ -41,17 +41,18 @@ If MCP tools are not exposed in the session, say that plainly. Do not pretend th
   unless the user explicitly asks for that.
 - Read the tool's `verified` flag and `verification` block. Treat `verified:
   false` or `verified: null` as NOT confirmed — the cut is untrusted until the
-  actual clip layout confirms it (`verify_sequence_layout`, `get_full_project_data`,
-  or clip-level inspection).
+  actual clip layout confirms it (`verify_sequence_layout`, plus clip-level
+  inspection if needed).
 - If the tool reports success but the target sequence did not change, stop and
   report a Premiere focus / keyboard automation problem. Do not invent a fallback
   edit strategy inside the live project.
 - Do not use `set_clip_position` to close gaps. It can stretch/expand clips rather
   than move them safely.
 - If a residual gap is reported after a cut (Extract did not regroup, e.g. because
-  a track was not targeted), stop and report it. Do not close it with
-  `set_clip_position`, split, or trim. Tell the user the cuts landed but a gap
-  needs manual packing.
+  a track was not targeted), go to Gap Handling. Use only the documented native
+  Close Gap recovery when its constraints are met; otherwise stop and report the
+  exact residual gap. Do not close it with `set_clip_position`, split, trim, or
+  delete fallback APIs.
 
 Unsafe tools for this workflow (all carry an `UNSAFE` docstring prefix in the
 server; `cut_and_ripple_delete_at_times` has been retired and is not registered):
@@ -148,8 +149,8 @@ or focus/command mapping failed).
 - Only close gaps if there is a documented, verified-safe Premiere workflow for
   the current project state.
 - If a residual gap is reported and no safe gap-closing method is verified, stop
-  and tell the user: "Cuts landed but a gap remains for manual packing," and give
-  the exact gap location from the `verification` block.
+  and tell the user: "Cuts landed but verified packing did not complete," and
+  give the exact gap location from the `verification` block.
 
 ### Documented Native Close Gap Recovery
 

@@ -81,8 +81,8 @@ Relevant files:
    it makes the target sequence active and confirms it — if it cannot confirm the
    target is the focused Timeline, it refuses (the Extract keystroke would hit the
    wrong sequence) and returns `nextSteps`. Each range is then removed with
-   Premiere's **Extract** (ripple-delete), which closes its gap in the same
-   A/V-synced op — this is the "regroup" step, done natively per cut.
+   Premiere's **Extract** (ripple-delete), which normally closes its gap in the
+   same A/V-synced op — this is the "regroup" step, done natively per cut.
 5. Read the top-level flags: `verified`, `packed` (fully back to back), `avSynced`
    (every cut frame-aligned across video and audio), and `nextSteps`. The
    `verification` block reports expected vs actual removed time (measured on clip
@@ -92,16 +92,31 @@ Relevant files:
    the same `packed` / `avMisalignments` / `videoAudioInSync` / `warnings`. For a
    visual check, `get_sequence_frame_image(sequence_id, seconds)` returns the frame
    at a timestamp as an inline image (read-only) so you can see a cut junction.
-7. Stop if the tool reports success but the clip layout is unchanged, or if any
-   residual gap / A/V misalignment is reported. Hand the user the `nextSteps`.
+7. Stop if the tool reports success but the clip layout is unchanged. If a
+   residual gap / A/V misalignment is reported, use only the documented native
+   Close Gap recovery when its constraints are met; otherwise hand the user the
+   `nextSteps` and stop.
+
+### Native Close Gap recovery
+
+Use this only when Premiere/UXP reports no frame ticks (`frameRateValue: null`,
+`ticksPerFrame: null`) and Extract has actually changed the requested active
+sequence but left tiny native gaps. Press Premiere's **Sequence > Close Gap**
+shortcut (`W` in this workspace) one pass at a time, then re-run
+`verify_sequence_layout`. Keep the edit only when `packed: true`,
+`videoAudioInSync: true`, `gapCount: 0`, and `warnings: []`. If those flags do
+not verify after bounded passes, undo back to the previous clean baseline and
+stop. Never use `set_clip_position`, split, trim, delete, alternate sequences, or
+rendered assemblies to recover a transcript cut.
 
 ### End-to-end transcript edit (the supported path)
 
 1. Plan removal ranges from the transcript (planning skill) and get user approval.
 2. Call `remove_silence_segments(sequence_id, segments)` — it cuts, regroups via
    Extract, frame-snaps, and verifies in one call.
-3. Confirm `verified: true` and zero residual gaps; otherwise report the real
-   state and stop.
+3. Confirm `verified: true` and zero residual gaps. If only the documented tiny
+   Extract-gap case occurs, run the native Close Gap recovery above and verify
+   clean; otherwise report the real state and stop.
 4. The user finishes the edit manually (color, audio polish, b-roll). Optional
    helpers: `premiere_apply_lumetri_correction`, `premiere_clean_audio_pipeline`.
 
@@ -116,6 +131,8 @@ no UXP API and stay manual.
   explicitly asks for that.
 - Do not use split/delete/trim fallback APIs for linked timeline cuts.
 - Do not use `set_clip_position` to close gaps.
+- Do not use Close Gap as a generic repair tool; use it only under the documented
+  native recovery constraints and verify after every pass.
 - Report exact verified state before continuing after a partial failure.
 
 ## Applying Plugin / Server Changes

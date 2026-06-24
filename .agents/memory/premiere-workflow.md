@@ -27,7 +27,9 @@ the user explicitly asks for that path.
 - The tool processes cuts end-to-start and cuts with Premiere's **Extract**
   (apostrophe, macOS key code 39) — a ripple-delete that removes the in/out range
   across targeted tracks AND closes the gap in the same A/V-synced native op.
-  This is the "regroup" step; no separate gap-closing call is needed or allowed.
+  This is the normal "regroup" step. A separate gap-closing call is not part of
+  the happy path; use only the documented native Close Gap recovery below when
+  verification proves that exact failure mode.
 - The tool frame-snaps removal ranges (`frame_snap=True`) to avoid 1-frame V/A
   gaps, reads the sequence before and after, and returns top-level `verified`,
   `packed` (fully back to back), `avSynced` (every cut frame-aligned across V/A),

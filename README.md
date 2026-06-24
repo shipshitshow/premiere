@@ -45,8 +45,17 @@ ranges (in source-timeline seconds); for each range it:
    cannot confirm it (the Extract keystroke lands on whatever timeline is focused).
 2. **Frame-snaps** the range so video and audio cut on the exact same frame.
 3. **Extracts** the range with Premiere's native ripple-delete, which closes the
-   gap in the same A/V-synced op — the "regroup," done natively per cut.
+   gap in the same A/V-synced op — the normal "regroup," done natively per cut.
 4. **Verifies** the result and returns it.
+
+If Premiere/UXP cannot provide frame ticks, `frame_snap=True` cannot actually
+snap the range before Extract. In that specific state, Extract can remove the
+right material but leave tiny native gaps. The only documented recovery is
+Premiere's own **Sequence > Close Gap** command (`W` in this workspace), one pass
+at a time, with `verify_sequence_layout` after every pass. Keep the edit only
+when the sequence reads back `packed: true`, `videoAudioInSync: true`,
+`gapCount: 0`, and `warnings: []`; otherwise undo to the previous clean baseline
+and stop.
 
 ### Verification contract
 
@@ -120,6 +129,9 @@ The MCP server command (already wired into `.mcp.json` / `.claude` / `.codex`) i
   split/trim/delete fallbacks or `set_clip_position` to close gaps — they desync
   linked audio/video. (They exist in the server, inherited from upstream, but
   carry an `UNSAFE` docstring and are not part of the cut workflow.)
+- The only allowed gap recovery is the documented native Premiere Close Gap flow
+  above, and only after verification proves the gaps are tiny Extract-created
+  gaps in the requested active sequence.
 - Do not create replacement timelines, rendered proxy edits, or alternate
   assemblies unless explicitly asked.
 - Stop on uncertain focus, wrong sequence, proxy disconnect, or failed verification.

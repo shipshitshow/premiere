@@ -26,8 +26,9 @@ If MCP tools are not exposed in the session, say that plainly. Do not pretend th
 - The tool processes end-to-start and cuts with Premiere's **Extract**
   (apostrophe, macOS key code 39): a ripple-delete that removes the in/out range
   across targeted tracks AND closes the gap in the same A/V-synced native op. The
-  "regroup" happens inside each Extract — there is no separate gap-closing call,
-  and none is allowed.
+  "regroup" normally happens inside each Extract. If Premiere/UXP cannot provide
+  frame ticks and verification reports only tiny native Extract gaps, use the
+  bounded native Close Gap recovery in the Gap Handling section.
 - The tool frame-snaps ranges (`frame_snap=True`) to avoid 1-frame V/A gaps and
   runs verification (`verify=True`) by reading the sequence before and after.
 - Before cutting, the tool asserts the target `sequence_id` IS the active/focused
@@ -109,6 +110,32 @@ After each cut batch:
 
 Do not trust MCP success responses alone.
 
+## Audio Polish Workflow
+
+For this user's livestream/dialogue edits, the preferred audio polish is a
+track-level Audio Track Mixer insert chain on the dialogue track, not only
+clip-level cleanup:
+
+1. Parametric EQ
+2. DeNoise — Amount `20.0%`
+3. DeReverb — Amount `20.0%`
+4. Vocal Enhancer — Mode `Low Tone`
+
+Observed mixer parameter: Parametric EQ `Low Shelf Frequency` around `110.39 Hz`.
+
+Current automation limits:
+
+- `premiere_clean_audio_pipeline` applies DeNoise/DeReverb across audio clips.
+- `premiere_add_effect` can add audio effects to individual audio clips.
+- The current MCP tool surface does not safely control Audio Track Mixer insert
+  slots, track-level effect parameters, Vocal Enhancer mode, or Premiere's speech
+  enhancement UI.
+
+If asked to apply the "proper audio edit," first check whether new track-mixer
+tools are available. If they are not, say that only the clip-level subset can be
+automated and ask the user to do the Audio Track Mixer preset manually, or extend
+the UXP bridge before claiming the full preset is applied. Always verify by ear.
+
 ## Gap Handling
 
 Extract (the cut command) closes each removed range's gap in the same op, so a
@@ -118,11 +145,35 @@ or focus/command mapping failed).
 
 - Do not close gaps with `set_clip_position`; it can stretch/expand clips.
 - Do not close gaps with split/trim/delete fallback APIs.
-- Only close gaps if there is a documented, verified-safe Premiere workflow for the
-  current project state.
+- Only close gaps if there is a documented, verified-safe Premiere workflow for
+  the current project state.
 - If a residual gap is reported and no safe gap-closing method is verified, stop
   and tell the user: "Cuts landed but a gap remains for manual packing," and give
   the exact gap location from the `verification` block.
+
+### Documented Native Close Gap Recovery
+
+For Premiere 2026 runs where `getSequenceLayout` returns `frameRateValue: null`
+and `ticksPerFrame: null`, `frame_snap=True` cannot snap before Extract. In that
+state, `remove_silence_segments` may remove the right duration but leave tiny
+native gaps (about 0.03-0.07s) and `packed: false`.
+
+The verified recovery is Premiere's own **Sequence > Close Gap** command (`W` in
+this workspace), not any lower-level clip mutation. Use it only when:
+
+- `remove_silence_segments` actually changed the requested active sequence.
+- The residual gaps are tiny gaps introduced by native Extract.
+- You press `W` one pass at a time and re-run `verify_sequence_layout` after each
+  pass.
+- You keep the cut only when `packed: true`, `videoAudioInSync: true`,
+  `gapCount: 0`, and `warnings: []`.
+- If those flags do not all verify after bounded Close Gap passes, undo back to
+  the previous clean baseline and stop.
+
+Known 2026-06-23 livestream note: the planned `431.85-508.74` removal cuts before
+the word "loop." and produces a fractional-frame mismatch. Use
+`432.15-508.74`; it verified clean after two native Close Gap passes. The lead
+cut `0.0-330.96` verified clean after one native Close Gap pass.
 
 ## Never Create Unless Explicitly Asked
 

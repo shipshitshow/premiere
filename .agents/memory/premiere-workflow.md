@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-06-13
+last_verified: 2026-06-23
 ---
 
 # Premiere Workflow Memory
@@ -43,6 +43,37 @@ the user explicitly asks for that path.
   `verify_sequence_layout` and report the real state; never claim success from the
   MCP flag alone.
 
+## Premiere 2026 Close Gap Recovery
+
+Observed on the 2026-06-23 livestream cut: Premiere/UXP returned
+`frameRateValue: null` and `ticksPerFrame: null`, so `frame_snap=True` could not
+snap ranges before Extract. Extract still removed the right material, but some
+cuts left tiny native gaps (roughly 0.03-0.07s) that verification correctly
+reported as `packed: false`.
+
+When this exact condition happens, the verified-safe recovery is Premiere's
+native **Sequence > Close Gap** command (`W` in this workspace), followed by
+`verify_sequence_layout` after every press. This is a native Premiere pack step,
+not `set_clip_position`, split, trim, or API clip mutation.
+
+Use it only under these constraints:
+
+- `remove_silence_segments` actually changed the target sequence.
+- The active sequence id/name is still the requested sequence.
+- The residual gaps are tiny native Extract gaps, not arbitrary user-created
+  timeline holes.
+- Press `W` one pass at a time, then re-run `verify_sequence_layout`.
+- Keep the cut only when `packed: true`, `videoAudioInSync: true`,
+  `gapCount: 0`, and `warnings: []`.
+- If A/V still fails after bounded Close Gap passes, undo back to the previous
+  clean baseline and stop.
+
+For the 2026-06-23 "Claude & Codex loops" edit specifically, the transcript
+boundary `431.85-508.74` cut before the word "loop." and produced a mismatch.
+Use `432.15-508.74` instead; it kept the full sentence and verified clean after
+two native Close Gap passes. The lead cut `0.0-330.96` verified clean after one
+native Close Gap pass.
+
 ## Verification + Effects Tools
 
 - `verify_sequence_layout(sequence_id)` — clip counts, duration, residual gaps
@@ -56,6 +87,28 @@ the user explicitly asks for that path.
 - `premiere_clean_audio_pipeline(...)` — adds DeNoise/DeReverb across audio clips
   (fuzzy-matched against live effect names). Reversible; not "Enhance Speech"
   (no API). Verify by ear.
+
+## Audio Polish Preset
+
+The user's normal dialogue cleanup is a track-level Audio Track Mixer insert
+chain, applied to the dialogue track after the cut is assembled:
+
+1. Parametric EQ
+2. DeNoise — Amount `20.0%`
+3. DeReverb — Amount `20.0%`
+4. Vocal Enhancer — Mode `Low Tone`
+
+Observed Parametric EQ setting from the mixer UI: `Low Shelf Frequency` around
+`110.39 Hz`.
+
+Current MCP support is close but not complete: `premiere_clean_audio_pipeline`
+can apply DeNoise/DeReverb as clip-level effects, and `premiere_add_effect` can
+add audio effects to clips. It does not yet control Audio Track Mixer inserts,
+set track-level audio effect parameters, or apply Premiere's speech enhancement
+UI. Until those track-mixer controls are exposed, do not claim this house audio
+preset was fully applied by automation; either have the user do the mixer insert
+chain manually or add/verify a UXP command that can target track effects and read
+the resulting mixer state back.
 
 ## Hard Stops
 

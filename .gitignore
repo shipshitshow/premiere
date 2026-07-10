@@ -19,17 +19,16 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.ruff_cache/
 
 # Virtual environments
 .venv/
 venv/
 ENV/
-app/.venv/
 node_modules/
 
-# IDE
+# IDE (.vscode is tracked on purpose)
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
@@ -43,7 +42,7 @@ node_modules/
 htmlcov/
 .tox/
 
-# Project specific
+# Project specific — media and runtime artifacts
 *.mp4
 *.mov
 *.mkv
@@ -59,25 +58,16 @@ output/
 music/*.mp3
 music/*.wav
 
-# Credentials (NEVER COMMIT)
+# Credentials (NEVER COMMIT). Secret-name-specific on purpose: the old blanket
+# *.json ignore silently swallowed every new JSON file (configs, manifests) and
+# needed a hand-maintained whitelist. The Secret Scan CI gate covers the rest.
 .env
 .env.local
-*.json
-!config/*.json
-!.claude/settings.json
-!.mcp.json
-!package.json
-!apps/premiere/adobe-mcp/proxy-server/package-lock.json
-!apps/premiere/adobe-mcp/uxp-plugins/premiere/manifest.json
-!biome.json
-!bun.lock
-!bun.lockb
-!.vscode/
-!.vscode/settings.json
-!.vscode/extensions.json
 credentials.json
 client_secrets.json
+client_secret*.json
 token.pickle
+*.pem
 
 # OS
 .DS_Store

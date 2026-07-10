@@ -1,5 +1,5 @@
 ---
-last_verified: 2026-06-23
+last_verified: 2026-07-10
 ---
 
 # Premiere Workflow Memory
@@ -22,6 +22,12 @@ the user explicitly asks for that path.
 
 ## Cutting Contract
 
+- Run `premiere_preflight()` first: one read-only call that checks proxy, UXP
+  plugin connection, open project, active sequence, frame-tick readability, and
+  focus, with `nextSteps` for anything broken.
+- Plan first: `remove_silence_segments(..., dry_run=True)` validates and
+  frame-snaps every range and returns the exact cut plan WITHOUT touching the
+  timeline. Get user approval on the plan, then execute with `dry_run=False`.
 - Use `remove_silence_segments` for transcript-based removals.
 - Provide removal ranges in source timeline seconds.
 - The tool processes cuts end-to-start and cuts with Premiere's **Extract**
@@ -56,7 +62,11 @@ reported as `packed: false`.
 When this exact condition happens, the verified-safe recovery is Premiere's
 native **Sequence > Close Gap** command (`W` in this workspace), followed by
 `verify_sequence_layout` after every press. This is a native Premiere pack step,
-not `set_clip_position`, split, trim, or API clip mutation.
+not `set_clip_position`, split, trim, or API clip mutation. The
+`close_gap_recovery(sequence_id)` tool automates exactly this bounded loop —
+it refuses on oversized gaps / sequence mismatch / existing A/V misalignments,
+verifies after every press, and hard-stops if clip content changes. Prefer it
+over manual `W` presses.
 
 Use it only under these constraints:
 
@@ -78,6 +88,10 @@ native Close Gap pass.
 
 ## Verification + Effects Tools
 
+- `premiere_preflight()` — read-only health check of proxy, plugin, project,
+  active sequence, frame ticks, and focus. Run it first.
+- `close_gap_recovery(sequence_id)` — the automated bounded Close Gap recovery
+  (see above). The only allowed gap fix.
 - `verify_sequence_layout(sequence_id)` — clip counts, duration, residual gaps
   (per lane, incl. a leading gap before the first clip), `avMisalignments`,
   `videoAudioInSync`, and `warnings` from the live sequence. Use after any edit.
@@ -124,11 +138,19 @@ Stop and report status if:
 
 ## Unsafe For This Workflow
 
+The canonical list lives in `apps/premiere/skills/premiere-mcp-ops/SKILL.md`;
+all 13 carry an `UNSAFE` docstring prefix in the server:
+
 - `split_video_clip`
 - `split_audio_clip`
-- `remove_linked_clip_range`
+- `split_clip_at_time`
 - `batch_split_clips`
-- `cut_at_playhead`
 - `trim_video_clip`
 - `trim_audio_clip`
+- `remove_video_clip_range`
+- `remove_linked_clip_range`
+- `remove_clips`
+- `delete_clip`
+- `cut_at_playhead`
+- `ripple_delete`
 - `set_clip_position`

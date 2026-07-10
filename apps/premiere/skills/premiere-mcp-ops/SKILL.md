@@ -9,17 +9,28 @@ Use this skill for the fragile, repo-specific Premiere control path.
 
 ## Preconditions
 
-Before any cut execution, confirm:
+Before any cut execution, run `premiere_preflight()` — one read-only call that
+checks the whole chain in dependency order and returns `nextSteps` for anything
+broken:
 
-- proxy server is running on `localhost:3001`
-- Premiere is connected to the proxy
-- the active sequence exists
+- proxy server is running on `localhost:3001` (its `/status` endpoint; also
+  `bun run premiere:status` from a shell)
+- the Premiere UXP plugin is registered with the proxy (the panel's Connect button)
+- a project is open and the active sequence exists
+- frame ticks are readable (when they are not — the known Premiere 2026 failure —
+  frame-snapping is unavailable and cuts may need `close_gap_recovery` afterwards)
 - Premiere is the frontmost window
 
-If MCP tools are not exposed in the session, say that plainly. Do not pretend the edit was applied.
+Proceed only when it returns `ready: true`. If MCP tools are not exposed in the
+session, say that plainly. Do not pretend the edit was applied.
 
 ## Cutting Rules
 
+- PLAN FIRST: run `remove_silence_segments(..., dry_run=True)`. Nothing is cut —
+  it validates every range (types, order, bounds), frame-snaps, merges overlaps,
+  and returns `plannedCuts` + `expectedRemovedSeconds`. Show the plan to the
+  user, get approval, then re-run with `dry_run=False`. Never execute a cut the
+  user has not seen as a plan.
 - Use `remove_silence_segments` only for transcript-based removal ranges.
 - Do not use split/delete combinations that can desync video and audio.
 - Provide removal segments in source timeline seconds.
@@ -54,18 +65,22 @@ If MCP tools are not exposed in the session, say that plainly. Do not pretend th
   exact residual gap. Do not close it with `set_clip_position`, split, trim, or
   delete fallback APIs.
 
-Unsafe tools for this workflow (all carry an `UNSAFE` docstring prefix in the
-server; `cut_and_ripple_delete_at_times` has been retired and is not registered):
+Unsafe tools for this workflow — this is the CANONICAL list (all 13 carry an
+`UNSAFE` docstring prefix in the server; other docs reference this list;
+`cut_and_ripple_delete_at_times` has been retired and is not registered):
 
 - `split_video_clip`
 - `split_audio_clip`
-- `remove_linked_clip_range`
-- `remove_video_clip_range`
+- `split_clip_at_time`
 - `batch_split_clips`
-- `cut_at_playhead`
-- `ripple_delete`
 - `trim_video_clip`
 - `trim_audio_clip`
+- `remove_video_clip_range`
+- `remove_linked_clip_range`
+- `remove_clips`
+- `delete_clip`
+- `cut_at_playhead`
+- `ripple_delete`
 - `set_clip_position`
 
 ## Verification Contract
@@ -155,21 +170,27 @@ or focus/command mapping failed).
 ### Documented Native Close Gap Recovery
 
 For Premiere 2026 runs where `getSequenceLayout` returns `frameRateValue: null`
-and `ticksPerFrame: null`, `frame_snap=True` cannot snap before Extract. In that
-state, `remove_silence_segments` may remove the right duration but leave tiny
-native gaps (about 0.03-0.07s) and `packed: false`.
+and `ticksPerFrame: null` (it now also returns `frameRateError` saying why),
+`frame_snap=True` cannot snap before Extract. In that state,
+`remove_silence_segments` may remove the right duration but leave tiny native
+gaps (about 0.03-0.07s) and `packed: false`.
 
 The verified recovery is Premiere's own **Sequence > Close Gap** command (`W` in
-this workspace), not any lower-level clip mutation. Use it only when:
+this workspace), not any lower-level clip mutation. It is automated as the
+`close_gap_recovery(sequence_id)` tool, which enforces every constraint below:
+it refuses on oversized gaps, sequence mismatch, or existing A/V misalignments;
+presses one pass at a time; verifies after every press; and hard-stops if clip
+CONTENT changes (which would mean the key is bound to something destructive).
+Prefer the tool; press `W` manually only if the tool is unavailable. Either way:
 
 - `remove_silence_segments` actually changed the requested active sequence.
 - The residual gaps are tiny gaps introduced by native Extract.
-- You press `W` one pass at a time and re-run `verify_sequence_layout` after each
-  pass.
-- You keep the cut only when `packed: true`, `videoAudioInSync: true`,
-  `gapCount: 0`, and `warnings: []`.
+- One pass at a time, re-running `verify_sequence_layout` after each pass.
+- Keep the cut only when `packed: true`, `videoAudioInSync: true`,
+  `gapCount: 0`, and `warnings: []` (the tool reports this as `clean: true`).
 - If those flags do not all verify after bounded Close Gap passes, undo back to
-  the previous clean baseline and stop.
+  the previous clean baseline and stop (the tool's `nextSteps` say how many
+  undos).
 
 Known 2026-06-23 livestream note: the planned `431.85-508.74` removal cuts before
 the word "loop." and produces a fractional-frame mismatch. Use
@@ -221,9 +242,12 @@ user or stop with a clear status.
 
 ## Collaboration Rules
 
-- Planning and execution are separate steps.
+- Planning and execution are separate steps: `dry_run=True` is the plan,
+  `dry_run=False` is the execution, and user approval sits between them.
 - If the user asks for a timeline plan only, do not execute.
-- If the user asks to cut now, use the approved removal ranges directly.
+- If the user asks to cut now, still dry-run first (it is one cheap read-only
+  call and catches malformed/mismatched ranges), show the one-line summary, then
+  execute the approved plan directly.
 
 ## References
 

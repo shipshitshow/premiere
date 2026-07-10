@@ -54,8 +54,9 @@ The MCP command configured at the repo root is:
 ## Tool Surface
 
 The core server handles project/sequence inspection, media import, timeline
-editing, markers, trim, clip removal, keyboard-backed actions, and
-`remove_silence_segments`.
+editing, markers, trim, clip removal, keyboard-backed actions,
+`remove_silence_segments` (with `dry_run` planning), `premiere_preflight`
+(one-call health check), and `close_gap_recovery` (bounded gap recovery).
 
 The additional Premiere tools expose UXP-backed export, transcripts, keyframes,
 effect lookup/application, transition lookup/application, work area selection,
@@ -64,6 +65,7 @@ subsequence creation, clip handles, sequence selection, and MOGRT insertion.
 ## Workflow Contract
 
 - Edit the active Premiere sequence.
+- Preflight first (`premiere_preflight`), plan first (`dry_run=True`), then cut.
 - Prefer `remove_silence_segments` for transcript removal ranges.
 - Verify the timeline layout after tool calls.
 - Stop on focus, connection, sequence identity, or verification uncertainty.

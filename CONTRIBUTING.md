@@ -17,14 +17,9 @@ Work here by default:
 From the repo root:
 
 ```bash
-bun run premiere:check
-bun run format:check
-```
-
-For Python syntax across the active MCP workspace:
-
-```bash
-python3 -m compileall -q apps/premiere/adobe-mcp/adobe_mcp
+bun run premiere:check     # Python compile check
+bun run premiere:lint      # ruff (policy in pyproject.toml, enforced in CI)
+bun run format:check       # biome formatting (enforced in CI)
 ```
 
 ## Premiere Workflow Safety

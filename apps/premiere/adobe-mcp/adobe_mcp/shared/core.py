@@ -21,6 +21,6 @@ def createCommand(action:str, options:dict) -> str:
 def sendCommand(command:dict):
 
     response = socket_client.send_message_blocking(command)
-    
-    logger.log(f"Final response: {response['status']}")
+
+    logger.log(f"Final response: {(response or {}).get('status')}")
     return response

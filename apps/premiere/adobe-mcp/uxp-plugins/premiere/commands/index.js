@@ -26,6 +26,57 @@ const fs = require("uxp").storage.localFileSystem;
 const app = require("premierepro");
 const {consts, BLEND_MODES} = require("./consts.js")
 
+// Premiere uses 254016000000 ticks per second internally.
+const TICKS_PER_SECOND = 254016000000
+
+// Read the sequence frame rate defensively across possible API shapes.
+// Premiere 2026 sometimes fails this read entirely (the documented
+// frameRateValue/ticksPerFrame null failure) — the error is captured, not
+// swallowed, so callers can surface WHY frame-snapping is unavailable.
+const _getFrameRateInfo = async (sequence) => {
+    let frameRateValue = null
+    let ticksPerFrame = null
+    let error = null
+    try {
+        const settings = await sequence.getSettings()
+        const fr = await settings.getVideoFrameRate()
+        if (fr) {
+            if (typeof fr.value === "number") {
+                frameRateValue = fr.value
+            } else if (typeof fr.value === "function") {
+                frameRateValue = fr.value()
+            }
+            if (typeof fr.ticksPerFrame !== "undefined" && fr.ticksPerFrame !== null) {
+                ticksPerFrame = fr.ticksPerFrame.toString()
+            }
+        }
+        if (ticksPerFrame === null && typeof frameRateValue === "number" && frameRateValue > 0) {
+            ticksPerFrame = String(Math.round(TICKS_PER_SECOND / frameRateValue))
+        }
+    } catch (e) {
+        error = String(e)
+    }
+    // Fallback: the classic timebase (ticks per frame) if this API exposes it.
+    if (ticksPerFrame === null) {
+        try {
+            if (typeof sequence.getTimebase === "function") {
+                const tb = await sequence.getTimebase()
+                if (tb) {
+                    ticksPerFrame = tb.toString()
+                }
+            }
+        } catch (e) {
+            error = error || String(e)
+        }
+    }
+    // Consumers feed this to BigInt(); only a pure integer string is usable.
+    if (ticksPerFrame !== null && !/^\d+$/.test(ticksPerFrame)) {
+        error = error || `Unusable ticksPerFrame value: ${ticksPerFrame}`
+        ticksPerFrame = null
+    }
+    return { frameRateValue, ticksPerFrame, error }
+}
+
 const createSequenceFromMedia = async (command) => {
 
     let options = command.options
@@ -498,20 +549,25 @@ const importMedia = async (command) => {
 }
 
 
-const getAudioTracks = async (sequence) => {
-    let audioCount = await sequence.getAudioTrackCount()
+// Shared walker for video/audio track layouts — the two sides differ only in
+// which count/track getter they use.
+const getMediaTracks = async (sequence, isVideo) => {
+    const count = isVideo
+        ? await sequence.getVideoTrackCount()
+        : await sequence.getAudioTrackCount()
 
-    let audioTracks = []
-    for(let i = 0; i < audioCount; i++) {
-        let audioTrack = await sequence.getAudioTrack(i)
+    let mediaTracks = []
+    for(let i = 0; i < count; i++) {
+        let mediaTrack = isVideo
+            ? await sequence.getVideoTrack(i)
+            : await sequence.getAudioTrack(i)
 
         let track = {
             index:i,
             tracks:[]
         }
 
-        let clips = await audioTrack.getTrackItems(1, false)
-
+        let clips = await mediaTrack.getTrackItems(1, false)
 
         if(clips.length === 0) {
             continue
@@ -538,10 +594,12 @@ const getAudioTracks = async (sequence) => {
             })
         }
 
-        audioTracks.push(track)
+        mediaTracks.push(track)
     }
-    return audioTracks
+    return mediaTracks
 }
+
+const getAudioTracks = async (sequence) => getMediaTracks(sequence, false)
 
 const getSequences = async () => {
     let project = await app.Project.getActiveProject()
@@ -577,63 +635,21 @@ const getSequences = async () => {
     return out
 }
 
-const getVideoTracks = async (sequence) => {
-    let videoCount = await sequence.getVideoTrackCount()
+const getVideoTracks = async (sequence) => getMediaTracks(sequence, true)
 
-    let videoTracks = []
-    for(let i = 0; i < videoCount; i++) {
-        let videoTrack = await sequence.getVideoTrack(i)
+// Shared clip lookup for both media kinds; label keeps errors readable.
+const getMediaTrackItem = async (sequence, trackIndex, clipIndex, isVideo) => {
+    const label = isVideo ? "getVideoTrack" : "getAudioTrack"
+    let mediaTrack = isVideo
+        ? await sequence.getVideoTrack(trackIndex)
+        : await sequence.getAudioTrack(trackIndex)
 
-        let track = {
-            index:i,
-            tracks:[]
-        }
-
-        let clips = await videoTrack.getTrackItems(1, false)
-
-
-        if(clips.length === 0) {
-            continue
-        }
-
-
-        let k = 0;
-        for (const c of clips) {
-            let startTimeTicks = (await c.getStartTime()).ticks
-            let endTimeTicks = (await c.getEndTime()).ticks
-            let durationTicks = (await c.getDuration()).ticks
-            let durationSeconds = (await c.getDuration()).seconds
-            let name = (await c.getProjectItem()).name
-            let type = await c.getType()
-            let index = k++
-
-            track.tracks.push({
-                startTimeTicks,
-                endTimeTicks,
-                durationTicks,
-                durationSeconds,
-                name,
-                type,
-                index
-            })
-        }
-        
-        videoTracks.push(track)
-    }
-    return videoTracks
-}
-
-const getAudioTrack = async (sequence, trackIndex, clipIndex) => {
-
-    //todo: pass this in
-    let audioTrack = await sequence.getAudioTrack(trackIndex)
- 
-    if(!audioTrack) {
-        throw new Error(`getAudioTrack : audioTrackIndex [${trackIndex}] does not exist`)
+    if(!mediaTrack) {
+        const kind = isVideo ? "videoTrackIndex" : "audioTrackIndex"
+        throw new Error(`${label} : ${kind} [${trackIndex}] does not exist`)
     }
 
-
-    let trackItems = await audioTrack.getTrackItems(1, false)
+    let trackItems = await mediaTrack.getTrackItems(1, false)
 
     let trackItem;
     let i = 0
@@ -645,39 +661,17 @@ const getAudioTrack = async (sequence, trackIndex, clipIndex) => {
         }
     }
     if(!trackItem) {
-        throw new Error(`getAudioTrack : trackItemIndex [${clipIndex}] does not exist`)
+        throw new Error(`${label} : trackItemIndex [${clipIndex}] does not exist`)
     }
 
     return trackItem
 }
 
+const getAudioTrack = async (sequence, trackIndex, clipIndex) =>
+    getMediaTrackItem(sequence, trackIndex, clipIndex, false)
 
-const getVideoTrack = async (sequence, trackIndex, clipIndex) => {
-
-    //todo: pass this in
-    let videoTrack = await sequence.getVideoTrack(trackIndex)
- 
-    if(!videoTrack) {
-        throw new Error(`getVideoTrack : videoTrackIndex [${trackIndex}] does not exist`)
-    }
-
-    let trackItems = await videoTrack.getTrackItems(1, false)
-
-    let trackItem;
-    let i = 0
-    for(const t of trackItems) {
-        let index = i++
-        if(index === clipIndex) {
-            trackItem = t
-            break
-        }
-    }
-    if(!trackItem) {
-        throw new Error(`getVideoTrack : clipIndex [${clipIndex}] does not exist`)
-    }
-
-    return trackItem
-}
+const getVideoTrack = async (sequence, trackIndex, clipIndex) =>
+    getMediaTrackItem(sequence, trackIndex, clipIndex, true)
 
 const getProjectContentInfo = async () => {
     let project = await app.Project.getActiveProject()
@@ -1039,17 +1033,34 @@ const findLinkedClip = async (sequence, trackItem, isVideo, linkedTrackIndex) =>
 
     if (!counterpartTrack) return null
 
+    // Tolerance: half a frame. Linked V/A counterparts start on the same tick
+    // (or within rounding); the old 1-tick tolerance missed a counterpart that
+    // had drifted even slightly, so linked operations silently mutated ONE side
+    // and worsened the A/V desync. Half a frame still cannot match a
+    // neighboring clip, because clips are at least one frame long.
+    const info = await _getFrameRateInfo(sequence)
+    const ticksPerFrame = info.ticksPerFrame
+        ? BigInt(info.ticksPerFrame)
+        : BigInt(TICKS_PER_SECOND) / 24n
+    const tolerance = ticksPerFrame / 2n
+
+    // Return the CLOSEST clip within tolerance, not the first: audio clips are
+    // sample-accurate, so an unrelated sub-frame-nudged clip could otherwise
+    // win over the true counterpart.
     const clips = await counterpartTrack.getTrackItems(1, false)
+    let best = null
+    let bestDiff = null
     for (const clip of clips) {
         const clipStart = await clip.getStartTime()
         const clipTicks = BigInt(clipStart.ticks)
-        // Match within a small tolerance (1 tick)
-        if (sourceTicks - clipTicks <= 1n && clipTicks - sourceTicks <= 1n) {
-            return clip
+        const diff = sourceTicks > clipTicks ? sourceTicks - clipTicks : clipTicks - sourceTicks
+        if (diff <= tolerance && (bestDiff === null || diff < bestDiff)) {
+            best = clip
+            bestDiff = diff
         }
     }
 
-    return null
+    return best
 }
 
 const trimVideoClip = async (command) => {
@@ -1933,8 +1944,6 @@ const getClipInfo = async (command) => {
     const projectItem = await trackItem.getProjectItem()
     const disabled = await trackItem.isDisabled()
 
-    const TICKS_PER_SECOND = 254016000000
-
     return {
         name: projectItem ? projectItem.name : "Unknown",
         trackIndex: options.trackIndex,
@@ -1976,35 +1985,23 @@ const getSequenceLayout = async (command) => {
     const audioTracks = await getAudioTracks(sequence)
 
     // Frame rate is used to frame-snap edits and to size gap tolerances.
-    // Read it defensively across possible API shapes; callers fall back to
-    // no frame-snapping when it is unavailable.
-    let frameRateValue = null
-    let ticksPerFrame = null
-    try {
-        const settings = await sequence.getSettings()
-        const fr = await settings.getVideoFrameRate()
-        if (fr) {
-            if (typeof fr.value === "number") {
-                frameRateValue = fr.value
-            } else if (typeof fr.value === "function") {
-                frameRateValue = fr.value()
-            }
-            if (typeof fr.ticksPerFrame !== "undefined" && fr.ticksPerFrame !== null) {
-                ticksPerFrame = fr.ticksPerFrame.toString()
-            }
-        }
-    } catch (e) {
-        // optional
-    }
+    // When it is unavailable (documented Premiere 2026 failure) the read error
+    // is returned as frameRateError so the server can warn BEFORE cutting,
+    // instead of the failure surfacing later as tiny un-snapped gaps.
+    const frameRate = await _getFrameRateInfo(sequence)
 
-    return {
+    const out = {
         id: sequence.guid.toString(),
         name: sequence.name,
-        frameRateValue,
-        ticksPerFrame,
+        frameRateValue: frameRate.frameRateValue,
+        ticksPerFrame: frameRate.ticksPerFrame,
         videoTracks,
         audioTracks
     }
+    if (frameRate.ticksPerFrame === null) {
+        out.frameRateError = frameRate.error || "Frame rate unavailable from the UXP API"
+    }
+    return out
 }
 
 // ============================================
@@ -2648,17 +2645,24 @@ const addHandlesToClip = async (command) => {
         trackItem = await getAudioTrack(sequence, options.trackIndex, options.clipIndex)
     }
 
-    const TICKS_PER_SECOND = 254016000000
-
     // Get current in/out points
     const originalInPoint = await trackItem.getInPoint()
     const originalOutPoint = await trackItem.getOutPoint()
 
-    // Calculate new in/out points based on handle frames
-    const inPointOffsetTicks = BigInt(options.inPointFrames || 0) * BigInt(TICKS_PER_SECOND / 24) // Assuming 24fps, adjust as needed
-    const outPointOffsetTicks = BigInt(options.outPointFrames || 0) * BigInt(TICKS_PER_SECOND / 24)
+    // Handle frames are converted with the sequence's REAL frame rate (the old
+    // hardcoded 24fps made handles 25% short at 30fps, 150% off at 60fps).
+    const frameRate = await _getFrameRateInfo(sequence)
+    const ticksPerFrame = frameRate.ticksPerFrame
+        ? BigInt(frameRate.ticksPerFrame)
+        : BigInt(TICKS_PER_SECOND) / 24n
 
-    const newInPointTicks = BigInt(originalInPoint.ticks) - inPointOffsetTicks
+    const inPointOffsetTicks = BigInt(options.inPointFrames || 0) * ticksPerFrame
+    const outPointOffsetTicks = BigInt(options.outPointFrames || 0) * ticksPerFrame
+
+    let newInPointTicks = BigInt(originalInPoint.ticks) - inPointOffsetTicks
+    if (newInPointTicks < 0n) {
+        newInPointTicks = 0n // cannot extend before the first source frame
+    }
     const newOutPointTicks = BigInt(originalOutPoint.ticks) + outPointOffsetTicks
 
     const newInPoint = await app.TickTime.createWithTicks(newInPointTicks.toString())

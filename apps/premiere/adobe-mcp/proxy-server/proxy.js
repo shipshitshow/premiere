@@ -37,7 +37,7 @@ const io = new Server(server, {
   },
 })
 
-const PORT = 3001
+const PORT = Number(process.env.PORT) || 3001
 
 // Add middleware
 app.use(express.json())
@@ -95,24 +95,23 @@ io.on('connection', (socket) => {
   socket.on('command_packet', ({ application, command }) => {
     console.log(`Command from ${socket.id} for application ${application}:`, command)
 
-    // Register this client for this application if not already registered
-    //if (!applicationClients[application]) {
-    //  applicationClients[application] = new Set();
-    //}
-    //applicationClients[application].add(socket.id);
-
-    // Process the command
-
     let packet = {
       senderId: socket.id,
       application: application,
       command: command,
     }
 
-    sendToApplication(packet)
-
-    // Send response back to this client
-    //socket.emit('json_response', { from: 'server', command });
+    // Fail fast when no plugin is registered: without this the sender would
+    // block for its full timeout (default 120s) on a command nobody received.
+    if (!sendToApplication(packet)) {
+      socket.emit('packet_response', {
+        senderId: socket.id,
+        status: 'FAILURE',
+        message:
+          `No ${application} plugin is connected to the proxy. ` +
+          `Open the '${application}' MCP plugin panel in the application and click Connect.`,
+      })
+    }
   })
 
   socket.on('disconnect', () => {

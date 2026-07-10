@@ -2,9 +2,9 @@ name: Premiere MCP CI
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master]
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, master]
 
 jobs:
   premiere-mcp-check:
@@ -23,11 +23,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff
 
-      - name: Run Ruff critical checks
+      - name: Run Ruff (repo policy from pyproject.toml)
         run: |
-          ruff check --select E9,F821,F822,F823 \
-            apps/premiere/adobe-mcp/adobe_mcp
+          ruff check apps/premiere/adobe-mcp/adobe_mcp
 
       - name: Compile active Premiere MCP Python
         run: |
           python -m compileall -q apps/premiere/adobe-mcp/adobe_mcp
+
+      - name: Syntax-check proxy server
+        run: |
+          node --check apps/premiere/adobe-mcp/proxy-server/proxy.js
+          node --check apps/premiere/adobe-mcp/uxp-plugins/premiere/commands/index.js
+
+  format-check:
+    name: Biome Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.13"
+
+      - name: Install dev dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Biome CI
+        run: bun run format:check

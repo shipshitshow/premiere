@@ -20,11 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import socketio
-import time
-import threading
 import json
-from queue import Queue
+import threading
+from queue import Empty, Queue
+
+import socketio
+
 from . import logger
 
 # Global configuration variables
@@ -133,11 +134,27 @@ class PersistentSocketClient:
                     'command': command
                 })
 
-                response = q.get(timeout=wait_timeout)
+                try:
+                    response = q.get(timeout=wait_timeout)
+                except Empty:
+                    # The connection is fine; the OPERATION outran the timeout
+                    # (or the plugin never answered). Tear the connection down
+                    # anyway: a late response arriving after we stop listening
+                    # would otherwise be delivered to the NEXT command's queue.
+                    self._reset_connection()
+                    raise RuntimeError(
+                        f"Error: no response from {self._app} within {wait_timeout}s. "
+                        f"The command may still be running in {self._app} — verify its "
+                        "state before retrying. If the operation is just slow, raise "
+                        "PROXY_TIMEOUT; if the plugin panel shows Disconnected, "
+                        "reconnect it."
+                    ) from None
 
                 if response is None:
+                    self._reset_connection()
                     raise RuntimeError(
-                        f"Error: No response from {self._app}. Connection may have dropped."
+                        f"Error: connection to the proxy dropped while waiting for "
+                        f"{self._app}. Reconnect the proxy/plugin and retry."
                     )
 
                 try:
@@ -146,28 +163,34 @@ class PersistentSocketClient:
                     logger.log(f"Response (not JSON-serializable): {response}")
 
                 if response.get("status") == "FAILURE":
-                    raise AppError(f"Error returned from {self._app}: {response['message']}")
+                    raise AppError(
+                        f"Error returned from {self._app}: "
+                        f"{response.get('message', repr(response))}"
+                    )
 
                 return response
 
-            except AppError:
+            except (AppError, RuntimeError):
                 raise
             except Exception as e:
                 logger.log(f"[Persistent] Error waiting for response: {e}")
-                # Force reconnect on next call
-                try:
-                    if self._sio.connected:
-                        self._sio.disconnect()
-                except Exception:
-                    pass
-                self._connected.clear()
+                self._reset_connection()
                 raise RuntimeError(
-                    f"Error: Could not connect to {self._app}. Connection Timed Out. "
-                    f"Make sure that {self._app} is running and that the MCP Plugin is connected. "
-                    f"Original error: {e}"
-                )
+                    f"Error: sending to {self._app} failed ({type(e).__name__}: {e}). "
+                    f"Make sure the proxy server is running at {self._url} and the "
+                    f"{self._app} MCP plugin is connected."
+                ) from e
             finally:
                 self._current_queue = None
+
+    def _reset_connection(self):
+        """Drop the socket so the next call reconnects fresh."""
+        try:
+            if self._sio.connected:
+                self._sio.disconnect()
+        except Exception:
+            pass
+        self._connected.clear()
 
     def disconnect(self):
         """Explicitly disconnect the persistent client."""
@@ -206,25 +229,39 @@ def send_message_blocking(command, timeout=None):
         timeout (int): Maximum time to wait for response in seconds
 
     Returns:
-        dict: The response received from the server, or None if no response
+        dict: The response received from the server.
+
+    Raises:
+        RuntimeError: if the client is unconfigured or the send fails — callers
+        must never see a silent None where a response was expected.
     """
-    if not application or not proxy_url or not proxy_timeout:
-        logger.log("Socket client not configured. Call configure() first.")
-        return None
+    if not application or not proxy_url:
+        raise RuntimeError(
+            "Socket client not configured. Call socket_client.configure() first."
+        )
 
     client = _get_client()
     return client.send(command, timeout=timeout)
 
 
 def configure(app=None, url=None, timeout=None):
+    """Set (or re-set) the proxy connection parameters.
+
+    No-op when the effective values are unchanged — server.py configures at
+    import and command_runner re-configures lazily with the same env values, and
+    tearing down a healthy connection in between would force a pointless
+    reconnect mid-session.
+    """
     global application, proxy_url, proxy_timeout, _client
 
-    if app:
-        application = app
-    if url:
-        proxy_url = url
-    if timeout:
-        proxy_timeout = timeout
+    new_app = app or application
+    new_url = url or proxy_url
+    new_timeout = timeout if timeout is not None else proxy_timeout
+
+    if (new_app, new_url, new_timeout) == (application, proxy_url, proxy_timeout):
+        return
+
+    application, proxy_url, proxy_timeout = new_app, new_url, new_timeout
 
     # Reset singleton if config changes so next call reconnects with new settings
     if _client is not None:

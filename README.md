@@ -36,25 +36,37 @@ re-reads the sequence to prove the edit landed correctly.
 - Edits the **active sequence** in the live Premiere UI
 - Verifies every transcript cut and reports the real state, not just a success flag
 
-## The supported workflow: `remove_silence_segments`
+## The supported workflow: preflight → plan → cut → verify
 
-This is the only safe cut primitive. Give it the active sequence id and removal
-ranges (in source-timeline seconds); for each range it:
+`remove_silence_segments` is the only safe cut primitive, and it is wrapped in
+a check-first flow so nothing executes sight-unseen:
 
-1. **Confirms focus** — makes the target sequence active and refuses to cut if it
+0. **Preflight** — `premiere_preflight()` verifies the whole chain in one
+   read-only call: proxy up, UXP plugin connected, project open, active
+   sequence, frame ticks readable, Premiere frontmost. Broken links fail fast
+   with `nextSteps` instead of hanging until the timeout.
+1. **Plan (dry run)** — `remove_silence_segments(..., dry_run=True)` validates
+   every range (types, order, bounds, overlaps), frame-snaps, and returns the
+   exact `plannedCuts` and `expectedRemovedSeconds` **without touching the
+   timeline**. Approve the plan, then execute with `dry_run=False`.
+2. **Confirms focus** — makes the target sequence active and refuses to cut if it
    cannot confirm it (the Extract keystroke lands on whatever timeline is focused).
-2. **Frame-snaps** the range so video and audio cut on the exact same frame.
-3. **Extracts** the range with Premiere's native ripple-delete, which closes the
+3. **Frame-snaps** the range so video and audio cut on the exact same frame.
+4. **Extracts** the range with Premiere's native ripple-delete, which closes the
    gap in the same A/V-synced op — the normal "regroup," done natively per cut.
-4. **Verifies** the result and returns it.
+   Each Extract is confirmed against the live layout before the next; a
+   keystroke is only retried when the timeline provably did not change.
+5. **Verifies** the result and returns it.
 
 If Premiere/UXP cannot provide frame ticks, `frame_snap=True` cannot actually
 snap the range before Extract. In that specific state, Extract can remove the
 right material but leave tiny native gaps. The only documented recovery is
-Premiere's own **Sequence > Close Gap** command (`W` in this workspace), one pass
-at a time, with `verify_sequence_layout` after every pass. Keep the edit only
-when the sequence reads back `packed: true`, `videoAudioInSync: true`,
-`gapCount: 0`, and `warnings: []`; otherwise undo to the previous clean baseline
+Premiere's own **Sequence > Close Gap** command (`W` in this workspace), now
+automated as `close_gap_recovery(sequence_id)`: one pass at a time,
+`verify_sequence_layout` after every pass, refusing on oversized gaps or A/V
+misalignments, hard-stopping if clip content changes. Keep the edit only when
+it reports `clean: true` (`packed: true`, `videoAudioInSync: true`,
+`gapCount: 0`, `warnings: []`); otherwise undo to the previous clean baseline
 and stop.
 
 ### Verification contract
@@ -72,9 +84,12 @@ Treat `verified: false` / `null` as **not confirmed**. The A/V check tolerates
 only sub-frame rounding (half a frame) — a full one-frame drift is reported as a
 misalignment and fails `verified`/`avSynced`. Standalone helpers:
 
+- `premiere_preflight` — one-call health check of the proxy/plugin/project chain.
 - `verify_sequence_layout` — per-lane gaps, `avMisalignments`, end-skew, warnings.
 - `get_sequence_frame_image` — returns the frame at a timestamp as an inline image
   (read-only) so you can *see* a cut junction, on top of the numbers.
+- `close_gap_recovery` — the bounded, verified Close Gap recovery (the only
+  allowed gap fix).
 
 > Never trust an MCP success response on its own. Re-read the layout.
 
@@ -110,28 +125,35 @@ cd proxy-server
 npm install
 ```
 
-Load the Premiere UXP plugin in Adobe UXP Developer Tools from
-`apps/premiere/adobe-mcp/uxp-plugins/premiere`, then start the proxy from the
+Enable **UXP Developer Mode** in Premiere (Settings > Development), then load
+the Premiere UXP plugin in Adobe UXP Developer Tools from
+`apps/premiere/adobe-mcp/uxp-plugins/premiere`, and start the proxy from the
 repo root:
 
 ```bash
-bun run premiere:proxy
+bun run premiere:proxy     # start the Socket.IO proxy on :3001
+bun run premiere:status    # check proxy + connected plugin clients
 ```
 
 The MCP server command (already wired into `.mcp.json` / `.claude` / `.codex`) is
-`./.venv/bin/adobe-premiere`, with `PROXY_URL=http://localhost:3001`.
+`./.venv/bin/adobe-premiere`, with `PROXY_URL=http://localhost:3001`. If it fails
+with `ModuleNotFoundError`, re-run `.venv/bin/pip install -e apps/premiere/adobe-mcp`
+(the editable install goes stale if the workspace path changes). Once everything
+is up, `premiere_preflight()` from the agent session confirms the whole chain.
 
 ## Safety rules
 
 - Edit the active Premiere sequence, then verify it — success flags are untrusted
   until the clip layout actually changes.
-- Use `remove_silence_segments` for transcript cuts. Do **not** use
-  split/trim/delete fallbacks or `set_clip_position` to close gaps — they desync
-  linked audio/video. (They exist in the server, inherited from upstream, but
-  carry an `UNSAFE` docstring and are not part of the cut workflow.)
-- The only allowed gap recovery is the documented native Premiere Close Gap flow
-  above, and only after verification proves the gaps are tiny Extract-created
-  gaps in the requested active sequence.
+- Use `remove_silence_segments` for transcript cuts, always dry-run first. Do
+  **not** use split/trim/delete fallbacks or `set_clip_position` to close gaps —
+  they desync linked audio/video. (They exist in the server, inherited from
+  upstream, but all 13 carry an `UNSAFE` docstring prefix and are not part of
+  the cut workflow; the canonical list is in
+  `apps/premiere/skills/premiere-mcp-ops/SKILL.md`.)
+- The only allowed gap recovery is `close_gap_recovery` (the documented native
+  Premiere Close Gap flow above), and only after verification proves the gaps
+  are tiny Extract-created gaps in the requested active sequence.
 - Do not create replacement timelines, rendered proxy edits, or alternate
   assemblies unless explicitly asked.
 - Stop on uncertain focus, wrong sequence, proxy disconnect, or failed verification.
@@ -139,7 +161,8 @@ The MCP server command (already wired into `.mcp.json` / `.claude` / `.codex`) i
 ## Checks
 
 ```bash
-bun run premiere:check     # Python syntax / repo hygiene
+bun run premiere:check     # Python compile check
+bun run premiere:lint      # ruff (repo policy from pyproject.toml)
 bun run format:check       # Biome formatting
 ```
 
@@ -148,10 +171,14 @@ to be running.
 
 ## Credits
 
-Derived from the open-source [`adobe-mcp`](https://github.com/mikechambers/adb-mcp)
-project by **Mike Chambers** (MIT). The MCP server, proxy, and UXP plugin
-architecture come from that project; this repo focuses it on Premiere and adds the
-hardened, verification-first transcript-cut workflow.
+The MCP server, proxy, and UXP plugin architecture originate in **Mike
+Chambers'** open-source [`adb-mcp`](https://github.com/mikechambers/adb-mcp)
+(MIT); the vendored package layout here follows the
+[`adobe-mcp`](https://github.com/matrayu/adobe-mcp) packaging of that project.
+This repo focuses it on Premiere only and adds the hardened, verification-first
+transcript-cut workflow (dry-run planning, preflight, per-cut confirmation, and
+the bounded Close Gap recovery). As of mid-2026 Adobe ships no first-party
+Premiere Pro MCP server.
 
 ## License
 

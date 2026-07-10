@@ -1,13 +1,6 @@
 {
-  "mcpServers": {
-    "adobe-premiere": {
-      "type": "stdio",
-      "command": "./.venv/bin/adobe-premiere",
-      "timeout": 300,
-      "env": {
-        "PROXY_URL": "http://localhost:3001",
-        "PROXY_TIMEOUT": "120"
-      }
-    }
+  "enabledMcpjsonServers": ["adobe-premiere"],
+  "env": {
+    "MCP_TOOL_TIMEOUT": "900000"
   }
 }

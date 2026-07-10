@@ -8,26 +8,18 @@ import os
 
 from adobe_mcp.shared import socket_client
 
-
 PROXY_URL = os.environ.get("PROXY_URL", "http://localhost:3001")
 PROXY_TIMEOUT = int(os.environ.get("PROXY_TIMEOUT", "120"))
 
-_configured = False
-
-
-def _ensure_configured() -> None:
-    global _configured
-
-    if _configured:
-        return
-
-    socket_client.configure(app="premiere", url=PROXY_URL, timeout=PROXY_TIMEOUT)
-    _configured = True
-
 
 def run_command(action: str, options: dict) -> dict:
-    """Execute a Premiere UXP command through the proxy server."""
-    _ensure_configured()
+    """Execute a Premiere UXP command through the proxy server.
+
+    configure() is a no-op when the values are unchanged, so this composes with
+    server.py (which configures the same client at import) without tearing down
+    the live connection; it also lets this module work standalone.
+    """
+    socket_client.configure(app="premiere", url=PROXY_URL, timeout=PROXY_TIMEOUT)
     return socket_client.send_message_blocking(
         {
             "application": "premiere",

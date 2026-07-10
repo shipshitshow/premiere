@@ -36,7 +36,6 @@ from .command_runner import (
     set_sequence_selection,
 )
 
-
 # Lumetri Color effect match name (stable across recent Premiere versions).
 LUMETRI_MATCH_NAME = "AE.ADBE Lumetri"
 

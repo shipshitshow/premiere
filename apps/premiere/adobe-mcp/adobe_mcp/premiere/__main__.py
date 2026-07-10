@@ -1,6 +1,5 @@
-"""Main entry point for Premiere MCP server."""
-import sys
-from .server import mcp
+"""Main entry point for Premiere MCP server (python -m adobe_mcp.premiere)."""
+from . import main
 
 if __name__ == "__main__":
-    mcp.run(sys.stdin.buffer, sys.stdout.buffer)
+    main()

@@ -7,13 +7,13 @@
     "format": "bunx biome format --write .",
     "format:check": "bunx biome ci .",
     "premiere:check": "python3 -m compileall -q apps/premiere/adobe-mcp/adobe_mcp",
+    "premiere:lint": "ruff check apps/premiere/adobe-mcp/adobe_mcp",
     "premiere:proxy": "cd apps/premiere/adobe-mcp/proxy-server && node proxy.js",
+    "premiere:status": "curl -s http://localhost:3001/status",
     "prepare": "husky"
   },
   "lint-staged": {
-    "{package.json,biome.json,.mcp.json,.claude/settings.json,.vscode/settings.json,.vscode/extensions.json,apps/premiere/adobe-mcp/proxy-server/proxy.js,apps/premiere/adobe-mcp/proxy-server/package.json,apps/premiere/adobe-mcp/uxp-plugins/premiere/package.json,apps/premiere/adobe-mcp/uxp-plugins/premiere/manifest.json}": [
-      "bunx biome format --write"
-    ]
+    "*.{js,json}": ["bunx biome format --write --no-errors-on-unmatched"]
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

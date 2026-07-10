@@ -19,16 +19,15 @@
     }
   },
   "files": {
-    "include": [
-      "apps/premiere/adobe-mcp/proxy-server/proxy.js",
-      "apps/premiere/adobe-mcp/proxy-server/package.json",
-      "apps/premiere/adobe-mcp/uxp-plugins/premiere/package.json",
-      "apps/premiere/adobe-mcp/uxp-plugins/premiere/manifest.json",
-      ".claude/settings.json",
-      ".mcp.json",
-      ".vscode/settings.json",
-      ".vscode/extensions.json",
-      "package.json"
+    "ignore": [
+      "node_modules",
+      ".venv",
+      "**/package-lock.json",
+      ".claude/settings.local.json",
+      "apps/premiere/adobe-mcp/uxp-plugins/premiere/socket.io.js",
+      "apps/premiere/adobe-mcp/uxp-plugins/premiere/main.js",
+      "apps/premiere/adobe-mcp/uxp-plugins/premiere/commands",
+      "apps/premiere/scripts/legacy-extendscript"
     ]
   }
 }

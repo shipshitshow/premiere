@@ -1,5 +1,9 @@
 [mcp_servers.adobe-premiere]
 command = "./.venv/bin/adobe-premiere"
+# Tool calls can legitimately run long — a big remove_silence_segments batch
+# cuts + polls per segment, so size this for the whole batch, well above the
+# per-command PROXY_TIMEOUT of 120s.
+tool_timeout_sec = 900
 
 [mcp_servers.adobe-premiere.env]
 PROXY_URL = "http://localhost:3001"

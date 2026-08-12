@@ -41,7 +41,7 @@ Install proxy dependencies:
 
 ```bash
 cd apps/premiere/adobe-mcp/proxy-server
-npm install
+bun install
 ```
 
 Load the Premiere UXP plugin from:
@@ -72,7 +72,7 @@ Relevant files:
   from here)
 - `.claude/settings.json` — enables the `.mcp.json` server and raises the
   client-side MCP tool timeout above `PROXY_TIMEOUT`
-- `.codex/config.toml` — same server for Codex, with `tool_timeout_sec = 180`
+- `.codex/config.toml` — same server for Codex, with `tool_timeout_sec = 900`
 
 If `./.venv/bin/adobe-premiere` fails with `ModuleNotFoundError`, the venv's
 editable install is stale (it happened after the workspace moved) — re-run
@@ -188,3 +188,16 @@ node --check apps/premiere/adobe-mcp/proxy-server/proxy.js
 ```
 
 Live editing checks require Premiere Pro, the proxy, and the UXP plugin.
+
+## Env overrides
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PROXY_URL` | `http://localhost:3001` | Socket.IO proxy |
+| `PROXY_TIMEOUT` | `120` | Seconds to wait for one UXP command |
+| `PREMIERE_APP_NAME` | `Adobe Premiere Pro 2026` | macOS app name for focus |
+| `PREMIERE_APP_PATH` | unset | Absolute `.app` when several versions are installed |
+| `PREMIERE_CLOSE_GAP_KEY` | `w` | Close Gap shortcut in **this** workspace. Premiere's default `W` is Ripple Trim Next Edit. |
+
+The live-cut contract (unsafe tools, `packed` = program bed, Close Gap constraints)
+is in `apps/premiere/skills/premiere-mcp-ops/SKILL.md`. Do not fork it here.

@@ -76,7 +76,7 @@ After a cut, read the top-level flags:
 | Flag | Meaning |
 |------|---------|
 | `verified` | The right amount was removed, no new gap appeared, and every cut lands on the same frame for video and audio. |
-| `packed` | The whole sequence is back to back — zero gaps on any lane (including a leading gap). |
+| `packed` | The program bed is back to back — zero gaps on program lanes (including a leading gap). Overlay lanes (b-roll, titles, stingers) are reported separately and do not fail this. |
 | `avSynced` | Video and audio cut at the same timecode everywhere (frame-accurate). |
 | `nextSteps` | Plain instructions for the user when something needs attention. |
 

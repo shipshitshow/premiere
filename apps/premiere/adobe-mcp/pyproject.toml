@@ -13,7 +13,7 @@ authors = [
     {name = "Adobe MCP Contributors"},
 ]
 dependencies = [
-    "mcp>=1.1.1",
+    "mcp>=1.1.1,<2",
     "python-socketio>=5.0.0",
     "websocket-client>=1.8.0",
 ]
@@ -25,11 +25,12 @@ adobe-proxy = "adobe_mcp.proxy:main"
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
-    "black",
-    "isort",
-    "mypy",
     "ruff",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.hatch.build.targets.wheel]
 packages = ["adobe_mcp"]

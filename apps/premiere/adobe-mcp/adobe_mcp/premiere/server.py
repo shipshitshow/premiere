@@ -44,19 +44,25 @@ TICKS_PER_SECOND = 254016000000
 # "Adobe Premiere Pro 2025". This avoids a yearly hard-coded breakage.
 PREMIERE_APP_NAME = os.environ.get("PREMIERE_APP_NAME", "Adobe Premiere Pro 2026")
 
+# Optional absolute .app path for `open -a`. LaunchServices normally resolves
+# PREMIERE_APP_NAME on its own; set this when several Premiere versions are
+# installed and the name is ambiguous, e.g.
+# "/Applications/Adobe Premiere Pro 2026/Adobe Premiere Pro 2026.app".
+PREMIERE_APP_PATH = os.environ.get("PREMIERE_APP_PATH", "")
+
 
 def _sec_to_ticks(seconds: float) -> int:
     """Convert timeline seconds to Premiere ticks (truncating, sub-frame exact)."""
     return int(seconds * TICKS_PER_SECOND)
 
 
-def _run_osascript(script: str):
+def _run_osascript(script: str, timeout: int = 10):
     """Run one AppleScript snippet; returns the CompletedProcess."""
     return subprocess.run(
         ["osascript", "-e", script],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=timeout,
     )
 
 
@@ -65,8 +71,15 @@ def _send_key_to_premiere(key: str = None, key_code: int = None,
                           retries: int = 2):
     """Send one keystroke (by character or key code) to Premiere via AppleScript.
 
-    activate=True brings Premiere frontmost first (with a short settle delay);
-    activate=False assumes the caller already focused Premiere (batch mode).
+    activate=True brings Premiere frontmost first via _ensure_premiere_focused()
+    (LaunchServices + a confirmed frontmost poll) and RAISES if focus cannot be
+    confirmed; activate=False assumes the caller already focused Premiere (batch
+    mode). The keystroke itself never goes through AppleScript's `activate`: that
+    is an Apple event to Premiere's main thread, which stops answering while the
+    app is busy, so it blocks for the whole osascript timeout and fails -1712
+    even though the app is healthy (this is what killed `undo` mid-recovery).
+    System Events keystrokes keep working in that state.
+
     Retries only on -1712 Apple-event timeouts. NOTE: a -1712 can fire AFTER the
     key event was delivered, so callers cutting the timeline must NOT blindly
     retry on failure — verify the timeline state instead (see the cut loop).
@@ -77,18 +90,14 @@ def _send_key_to_premiere(key: str = None, key_code: int = None,
         modifier_str = ""
     press = f'keystroke "{key}"{modifier_str}' if key is not None else f"key code {key_code}{modifier_str}"
 
-    if activate:
-        script = f'''
-    tell application "{PREMIERE_APP_NAME}" to activate
-    delay 0.1
-    tell application "System Events"
-        {press}
-    end tell
-    '''
-    else:
-        script = f'''tell application "System Events"
+    script = f'''tell application "System Events"
     {press}
 end tell'''
+
+    if activate:
+        # Raises if Premiere cannot be confirmed frontmost — better than typing
+        # a destructive key into whatever window happens to be in front.
+        _ensure_premiere_focused()
 
     last_error = None
     for attempt in range(retries + 1):
@@ -114,10 +123,61 @@ def send_key_code_to_premiere(key_code: int, modifiers: list = None, retries: in
     return _send_key_to_premiere(key_code=key_code, modifiers=modifiers, retries=retries)
 
 
-def _ensure_premiere_focused():
-    """Activate Premiere Pro once before a batch operation."""
-    _run_osascript(f'tell application "{PREMIERE_APP_NAME}" to activate')
-    time.sleep(0.15)
+def _launch_premiere_frontmost():
+    """Ask LaunchServices (`open -a`) to raise Premiere. Returns (ok, error).
+
+    Deliberately NOT AppleScript's `activate`: that is an Apple event to
+    Premiere's main thread and hangs for the full timeout (-1712) whenever the
+    app is busy, even though the app is fine and UXP keeps answering. `open`
+    goes through LaunchServices, which has no such dependency.
+    """
+    target = PREMIERE_APP_PATH or PREMIERE_APP_NAME
+    try:
+        result = subprocess.run(
+            ["open", "-a", target], capture_output=True, text=True, timeout=15
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"`open -a {target}` timed out"
+    except Exception as e:
+        return False, f"`open -a {target}` failed: {e}"
+    if result.returncode != 0:
+        return False, (result.stderr or "").strip() or f"`open -a {target}` failed"
+    return True, None
+
+
+def _ensure_premiere_focused(timeout: float = 6.0):
+    """Bring Premiere frontmost before a batch operation and CONFIRM it, or raise.
+
+    Every caller follows this with keystrokes that go to whatever app is
+    frontmost — Extract, Close Gap, undo. So an unconfirmed focus attempt must
+    never be allowed to look like success: that is exactly how a batch marks an
+    In/Out range the Timeline never received and then Extracts a range nobody
+    planned. Raise instead, and let the caller refuse to start.
+    """
+    ok, err = _launch_premiere_frontmost()
+    deadline = time.time() + timeout
+    state = None
+    while True:
+        state = _premiere_is_frontmost()
+        if state is True:
+            time.sleep(0.15)  # brief settle before the first keystroke
+            return True
+        if time.time() >= deadline:
+            break
+        time.sleep(0.15)
+
+    if state is None:
+        raise Exception(
+            "Could not read the frontmost application via System Events — grant "
+            "Automation/Accessibility permission to the process hosting this MCP "
+            "server. Refusing to send keystrokes to an unverified window."
+        )
+    raise Exception(
+        f"Premiere ('{PREMIERE_APP_NAME}') did not become frontmost within "
+        f"{timeout:.1f}s"
+        + (f" — {err}" if err else "")
+        + ". Refusing to send keystrokes to another application."
+    )
 
 
 def _send_keystroke_fast(key: str, modifiers: list = None):
@@ -150,6 +210,34 @@ def _premiere_is_frontmost():
         return name.lower() in PREMIERE_APP_NAME.lower() or PREMIERE_APP_NAME.lower() in name.lower()
     except Exception:
         return None
+
+
+def _apple_events_responsive(timeout: int = 4):
+    """True/False if Premiere answers a trivial Apple event, None if unreadable.
+
+    Premiere's main thread stops answering Apple events while it is busy, and it
+    keeps answering UXP over the proxy the whole time — so every other health
+    read looks green while AppleScript `activate` hangs for its full timeout and
+    fails -1712. Nothing in the cut path depends on Apple events any more (focus
+    goes through LaunchServices, keystrokes through System Events), so this is
+    diagnostic: it separates "Premiere is wedged/modal" from "the bridge broke".
+
+    ONLY call this when Premiere is known to be running — `tell application`
+    would otherwise LAUNCH it.
+    """
+    try:
+        result = _run_osascript(
+            f'tell application "{PREMIERE_APP_NAME}" to get name', timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    except Exception:
+        return None
+    if result.returncode == 0:
+        return True
+    if "-1712" in (result.stderr or ""):
+        return False
+    return None
 
 
 # =============================================================================
@@ -2389,12 +2477,34 @@ def remove_silence_segments(sequence_id: str, silence_segments: list,
         }
     active_unconfirmed = not active_id
 
-    # Activate Premiere ONCE for the whole batch. Per-cut activation can hang
-    # while Premiere is busy, so we deliberately do not re-activate per segment.
+    # Focus Premiere ONCE for the whole batch. Per-cut activation can hang while
+    # Premiere is busy, so we deliberately do not re-focus per segment.
+    # This must be a HARD gate: the batch marks In/Out over UXP (which answers
+    # even when the window is not focused) and then Extracts with a keystroke
+    # (which needs focus). If focus silently failed, the marks land and the
+    # Extract does not — or lands half-applied, which is how a 20s cut once
+    # removed 3357s. Refuse to start instead.
     try:
         _ensure_premiere_focused()
-    except Exception:
-        pass
+    except Exception as e:
+        return {
+            "action": action, "dryRun": False,
+            "processed": 0, "succeeded": 0, "failed": 0,
+            "verified": False,
+            "refused": True,
+            "verification": {
+                "verified": False,
+                "reason": (
+                    f"Could not confirm Premiere is frontmost before cutting: {e} "
+                    "Nothing was marked or cut; the timeline is untouched."
+                ),
+            },
+            "nextSteps": [
+                "Click Premiere's Timeline so the app is frontmost.",
+                "Re-run premiere_preflight to confirm the control chain.",
+                "Then re-run remove_silence_segments with the SAME segments.",
+            ],
+        }
 
     probe_before = before_probe
 
@@ -2708,11 +2818,17 @@ def premiere_preflight():
     4. Frame ticks readable for the active sequence — when Premiere/UXP returns
        null (known Premiere 2026 failure) frame-snapping is unavailable and the
        Close Gap recovery may be needed after cuts.
-    5. Premiere frontmost (Extract keystrokes land on the focused Timeline).
+    5. Premiere frontmost (Extract keystrokes land on the focused Timeline), and
+       that System Events can be read at all — if it cannot, the guard that
+       stops a batch typing into the wrong window cannot run, so cuts refuse.
+    6. Premiere answering Apple events. Diagnostic: a -1712 here means the main
+       thread is wedged (modal dialog, background render) while UXP keeps
+       answering, which is why every other check can look green during a hang.
 
     Returns {ready, proxyRunning, pluginConnected, projectOpen, activeSequence,
-    frameSnapAvailable, premiereFrontmost, issues, nextSteps}. `ready: true`
-    means a transcript cut can proceed (dry-run it first regardless).
+    frameSnapAvailable, premiereFrontmost, appleEventsResponsive, issues,
+    nextSteps}. `ready: true` means a transcript cut can proceed (dry-run it
+    first regardless).
     """
     issues = []
     next_steps = []
@@ -2814,9 +2930,37 @@ def premiere_preflight():
             "would land elsewhere (cuts auto-focus Premiere, but keep it front "
             "during batches)."
         )
+    elif premiere_frontmost is None:
+        issues.append(
+            "Could not read the frontmost application via System Events — the "
+            "safety check that stops a batch from typing into the wrong window "
+            "cannot run, so cuts will refuse to start."
+        )
+        next_steps.append(
+            "Grant Automation + Accessibility permission to the process hosting "
+            "this MCP server (System Settings > Privacy & Security), then re-run "
+            "premiere_preflight."
+        )
+
+    # Apple-event health. Diagnostic only — the cut path uses LaunchServices for
+    # focus and System Events for keystrokes — but a wedged main thread is worth
+    # knowing about BEFORE a batch instead of discovering it as a mid-cut hang.
+    apple_events_responsive = _apple_events_responsive() if plugin_connected else None
+    if apple_events_responsive is False:
+        issues.append(
+            "Premiere is running and answering UXP, but NOT answering Apple "
+            "events (-1712) — its main thread is busy or blocked, often by a "
+            "modal dialog or a background render. Cutting does not depend on "
+            "Apple events, but Premiere may not process keystrokes promptly."
+        )
+        next_steps.append(
+            "Check Premiere for an open modal dialog or a running render and "
+            "clear it, then re-run premiere_preflight."
+        )
 
     ready = bool(proxy_running and plugin_connected and project_open
-                 and active_sequence and layout_readable)
+                 and active_sequence and layout_readable
+                 and premiere_frontmost is not None)
     if ready and not issues:
         next_steps.append(
             "Ready. Plan the cut with remove_silence_segments(..., dry_run=True), "
@@ -2833,6 +2977,7 @@ def premiere_preflight():
         "activeSequence": active_sequence,
         "frameSnapAvailable": frame_snap_available,
         "premiereFrontmost": premiere_frontmost,
+        "appleEventsResponsive": apple_events_responsive,
         "proxyStatus": proxy_status,
         "issues": issues,
         "nextSteps": next_steps,
@@ -2959,11 +3104,24 @@ def close_gap_recovery(sequence_id: str, max_passes: int = 3,
     content_tol = ft // 2
 
     # Bring Premiere frontmost once for the whole recovery (like the cut batch):
-    # the Close Gap keystroke goes to the focused app.
+    # the Close Gap keystroke goes to the focused app, and W is bound to Ripple
+    # Trim in a default workspace — pressing it blind into the wrong window, or
+    # into an unfocused Premiere, is not a risk worth taking. Refuse instead.
     try:
         _ensure_premiere_focused()
-    except Exception:
-        pass
+    except Exception as e:
+        return {
+            "action": action, "clean": False, "passes": 0, "refused": True,
+            "reason": (
+                f"Could not confirm Premiere is frontmost: {e} No key was "
+                "pressed; the timeline is untouched."
+            ),
+            "layout": baseline,
+            "nextSteps": [
+                "Click Premiere's Timeline so the app is frontmost, then re-run "
+                "close_gap_recovery.",
+            ],
+        }
 
     def _undo_steps(n: int) -> list:
         if n == 0:

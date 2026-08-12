@@ -386,6 +386,48 @@ def _detect_gaps(clips: list, frame_ticks):
     return gaps
 
 
+def _lane_roles(clips: list, duration_ticks: int, frame_ticks) -> dict:
+    """Classify each (kind, trackIndex) lane as "program" or "overlay".
+
+    A finished sequence has PROGRAM lanes — the base video/audio bed the edit
+    runs on, which must be back to back — and OVERLAY lanes carrying b-roll,
+    titles, transition stingers or SFX, which are sparse BY DESIGN. Treating
+    every lane as if it must be packed reports a stinger lane's 20 dead spots as
+    20 "gaps" and calls a perfectly clean timeline broken.
+
+    A lane is program when EITHER:
+      - it starts at tick 0 (the bed always does), or
+      - its summed content covers at least half the sequence.
+    The second clause is what keeps this safe: a program lane BROKEN by a bad
+    cut (leading gap, so it no longer starts at 0) still covers most of the
+    sequence, so it stays program and its gaps still raise warnings. Only a
+    genuinely sparse lane that also starts late is demoted to overlay.
+    """
+    tol = (frame_ticks // 2) if frame_ticks else int(TICKS_PER_SECOND * 0.001)
+    by_lane = {}
+    for c in clips:
+        by_lane.setdefault((c.get("kind", "?"), c["trackIndex"]), []).append(c)
+
+    roles = {}
+    for key, lane in by_lane.items():
+        starts_at_zero = min(c["start"] for c in lane) <= tol
+        content = sum((c["end"] - c["start"]) for c in lane)
+        dense = bool(duration_ticks) and content * 2 >= duration_ticks
+        roles[key] = "program" if (starts_at_zero or dense) else "overlay"
+    return roles
+
+
+def _tag_gap_lanes(gaps: list, roles: dict) -> list:
+    """Stamp each gap with the role of the lane it sits on."""
+    for g in gaps or []:
+        g["lane"] = roles.get((g.get("kind", "?"), g.get("trackIndex")), "program")
+    return gaps
+
+
+def _program_clips(clips: list, roles: dict) -> list:
+    return [c for c in clips if roles.get((c.get("kind", "?"), c["trackIndex"])) == "program"]
+
+
 def _gaps_by_lane(gaps: list) -> dict:
     """Count gaps per (kind, trackIndex) lane.
 
@@ -466,7 +508,12 @@ def _summarize_layout(layout: dict) -> dict:
     video_content = sum((c["end"] - c["start"]) for c in video)
     audio_content = sum((c["end"] - c["start"]) for c in audio)
 
-    gaps = _detect_gaps(video + audio, frame_ticks)
+    # Split lanes into the program bed (must be packed) and overlays such as
+    # b-roll, titles or transition stingers (sparse on purpose). Gaps on both are
+    # still REPORTED; only program gaps are treated as defects.
+    roles = _lane_roles(video + audio, duration_ticks, frame_ticks)
+    gaps = _tag_gap_lanes(_detect_gaps(video + audio, frame_ticks), roles)
+    program_gaps = [g for g in gaps if g["lane"] == "program"]
 
     return {
         "videoClipCount": len(video),
@@ -478,7 +525,10 @@ def _summarize_layout(layout: dict) -> dict:
         "videoContentTicks": video_content,
         "audioContentTicks": audio_content,
         "gaps": gaps,
-        "gapCount": len(gaps),
+        "gapCount": len(program_gaps),
+        "allLaneGapCount": len(gaps),
+        "overlayGapCount": len(gaps) - len(program_gaps),
+        "laneRoles": {f"{kind}{idx}": role for (kind, idx), role in sorted(roles.items())},
         "frameTicks": frame_ticks,
         "frameRateError": layout.get("frameRateError"),
     }
@@ -546,8 +596,13 @@ def _verify_cut(sequence_id: str, before: dict, expected_removed_ticks: int, fra
 
     # A/V sync: video and audio must cut at the same frame. End-skew is a weaker
     # secondary signal kept for the case where one media kind is absent.
-    av_applicable = bool(a_video) and bool(a_audio)
-    misalignments = _av_misalignments(a_video, a_audio, ft) if av_applicable else []
+    # Compare the program bed only: an overlay stinger or music sting legitimately
+    # starts on a frame no program cut lands on, and pooling it in here would
+    # report a clean cut as desynced.
+    a_roles = _lane_roles(a_video + a_audio, after.get("durationTicks", 0), ft)
+    pv, pa = _program_clips(a_video, a_roles), _program_clips(a_audio, a_roles)
+    av_applicable = bool(pv) and bool(pa)
+    misalignments = _av_misalignments(pv, pa, ft) if av_applicable else []
     if before.get("videoClipCount") and before.get("audioClipCount") and a_video and a_audio:
         end_skew = abs((before["videoEndTicks"] - after["videoEndTicks"]) -
                        (before["audioEndTicks"] - after["audioEndTicks"]))
@@ -2743,14 +2798,20 @@ def verify_sequence_layout(sequence_id: str):
         - videoClipCount / audioClipCount
         - durationSeconds
         - gaps: list of remaining gaps, per media-lane, INCLUDING a leading gap
-          before the first clip (kind, trackIndex, leading, start/end, gapSeconds,
-          gapFrames)
-        - packed: True when zero gaps remain on any lane (fully back to back)
-        - avMisalignments: cut junctions where video and audio do NOT line up
-          within one frame (empty == frame-accurate sync)
+          before the first clip (kind, trackIndex, lane, leading, start/end,
+          gapSeconds, gapFrames)
+        - laneRoles: each lane classified "program" (the base bed, must be packed)
+          or "overlay" (b-roll/titles/transition stingers, sparse by design)
+        - packed: True when zero gaps remain on the PROGRAM bed. Overlay-lane gaps
+          are counted separately (overlayGapCount) and never make this False —
+          otherwise every finished sequence with stingers reads as broken.
+        - allLanesPacked / allLaneGapCount: the strict every-lane view, for a bare
+          timeline where any gap at all is a defect.
+        - avMisalignments: PROGRAM cut junctions where video and audio do NOT line
+          up within one frame (empty == frame-accurate sync)
         - videoAudioInSync: True when there are no misalignments AND the ends are
           within ~2 frames
-        - warnings: plain-language problems, if any
+        - warnings: real problems. notes: informational (e.g. overlay-lane gaps).
     """
     layout = _fetch_layout(sequence_id)
     summary = _summarize_layout(layout)
@@ -2758,21 +2819,34 @@ def verify_sequence_layout(sequence_id: str):
     summary["sequenceId"] = layout.get("id")
     summary["sequenceName"] = layout.get("name")
     summary["packed"] = summary["gapCount"] == 0
+    summary["allLanesPacked"] = summary["allLaneGapCount"] == 0
 
     ft = summary.get("frameTicks") or int(TICKS_PER_SECOND / 24)
 
     # Frame-accurate A/V sync: every internal cut must land on the same timecode
-    # for video and audio. This is the precise "audio drifted a frame" check.
-    misalignments = _av_misalignments(video, audio, ft) if (video and audio) else []
+    # for video and audio. Judged on the PROGRAM bed only — an overlay stinger or
+    # SFX deliberately starting a frame off the cut is style, not desync.
+    roles = _lane_roles(video + audio, summary.get("durationTicks", 0), ft)
+    pv, pa = _program_clips(video, roles), _program_clips(audio, roles)
+    misalignments = _av_misalignments(pv, pa, ft) if (pv and pa) else []
     summary["avMisalignments"] = misalignments
+    summary["overlayGaps"] = [g for g in summary["gaps"] if g["lane"] == "overlay"]
 
     skew = abs(summary["videoEndTicks"] - summary["audioEndTicks"])
     summary["videoAudioEndSkewSeconds"] = round(skew / TICKS_PER_SECOND, 4)
     summary["videoAudioInSync"] = (not misalignments) and (skew <= 2 * ft)
 
     warnings = []
+    notes = []
+    if summary["overlayGapCount"]:
+        overlay_lanes = sorted({f"{g['kind']}{g['trackIndex']}" for g in summary["overlayGaps"]})
+        notes.append(
+            f"{summary['overlayGapCount']} gap(s) on overlay lane(s) {', '.join(overlay_lanes)} "
+            "— these carry b-roll/titles/transition stingers and are sparse by design, "
+            "so they are reported but not treated as defects."
+        )
     if not summary["packed"]:
-        leading = [g for g in summary["gaps"] if g.get("leading")]
+        leading = [g for g in summary["gaps"] if g.get("leading") and g["lane"] == "program"]
         if leading:
             warnings.append(
                 f"{len(leading)} clip lane(s) do not start at 0 — there is a gap "
@@ -2780,7 +2854,7 @@ def verify_sequence_layout(sequence_id: str):
             )
         inter = summary["gapCount"] - len(leading)
         if inter > 0:
-            warnings.append(f"{inter} gap(s) between clips — clips are not back to back.")
+            warnings.append(f"{inter} gap(s) between clips on the program bed — clips are not back to back.")
     if misalignments:
         spots = ", ".join(f"{m['side']}@{m['seconds']}s" for m in misalignments[:6])
         warnings.append(
@@ -2793,6 +2867,7 @@ def verify_sequence_layout(sequence_id: str):
             "(> 2 frames) — possible A/V desync at the tail."
         )
     summary["warnings"] = warnings
+    summary["notes"] = notes
     return summary
 
 
@@ -3081,8 +3156,23 @@ def close_gap_recovery(sequence_id: str, max_passes: int = 3,
                 "misaligned.",
             ],
         }
+    if baseline.get("overlayGapCount"):
+        # Overlay lanes mean this is a LAYERED sequence (b-roll, titles, stingers),
+        # not the bare post-Extract timeline this recovery was written for. Close
+        # Gap acts on the timeline as a whole, so a pass here could slide overlays
+        # off the frames they were placed on.
+        return {
+            "action": action, "clean": False, "passes": 0, "refused": True,
+            "reason": (
+                "Sequence has overlay lanes with intentional gaps (b-roll, titles or "
+                "transition stingers). close_gap_recovery only handles the bare "
+                "post-Extract timeline; a Close Gap pass here could shift overlays."
+            ),
+            "overlayGaps": baseline.get("overlayGaps", []),
+            "nextSteps": ["Close any program-bed gap manually in Premiere on this layered sequence."],
+        }
     oversized = [g for g in baseline.get("gaps", [])
-                 if g.get("gapSeconds", 0) > max_gap_seconds]
+                 if g.get("lane") == "program" and g.get("gapSeconds", 0) > max_gap_seconds]
     if oversized:
         return {
             "action": action, "clean": False, "passes": 0, "refused": True,

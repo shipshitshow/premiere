@@ -374,6 +374,11 @@ def insert_mogrt(
     return run_command("insertMogrt", options)
 
 
+def get_audio_track_info(sequence_id: str) -> dict:
+    """Read-only audio track inventory. Mixer inserts are not available."""
+    return run_command("getAudioTrackInfo", {"sequenceId": sequence_id})
+
+
 def get_sequence_layout(sequence_id: str) -> dict:
     """Get a focused single-sequence clip layout plus its frame rate.
 

@@ -2026,6 +2026,46 @@ const getSequenceLayout = async (command) => {
     return out
 }
 
+// Read-only audio-track inventory. Premiere's UXP AudioTrack surface has
+// name / mute / clips only — no Audio Track Mixer insert slots, no track-level
+// effect chain, no Vocal Enhancer mode. Callers must not claim the house
+// mixer preset was applied from this data.
+const getAudioTrackInfo = async (command) => {
+    const options = command.options
+    const sequence = await _getSequenceFromId(options.sequenceId)
+    if (!sequence) {
+        throw new Error("getAudioTrackInfo : Requires an active sequence.")
+    }
+    const count = await sequence.getAudioTrackCount()
+    const tracks = []
+    for (let i = 0; i < count; i++) {
+        const track = await sequence.getAudioTrack(i)
+        const clips = await track.getTrackItems(TRACK_ITEM_TYPE_CLIP, false)
+        let muted = null
+        try {
+            muted = await track.isMuted()
+        } catch {
+            muted = null
+        }
+        tracks.push({
+            index: i,
+            name: track.name,
+            muted,
+            clipCount: clips.length,
+        })
+    }
+    return {
+        sequenceId: sequence.guid.toString(),
+        sequenceName: sequence.name,
+        tracks,
+        mixerInsertsSupported: false,
+        mixerLimitation:
+            "UXP AudioTrack exposes name, mute, and clips only. " +
+            "Audio Track Mixer insert slots, track-level effect parameters, " +
+            "Vocal Enhancer mode, and Enhance Speech have no API.",
+    }
+}
+
 // ============================================
 // EFFECT + PARAMS (tolerant)
 // ============================================
@@ -2889,6 +2929,7 @@ const commandHandlers = {
     getClipInfo,
     // Layout / verification
     getSequenceLayout,
+    getAudioTrackInfo,
     // Export features
     exportSequence,
     getExportFileExtension,

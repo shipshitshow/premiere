@@ -2835,46 +2835,6 @@ def close_gap_recovery(sequence_id: str, max_passes: int = 3,
     }
 
 
-# RETIRED: not registered as an MCP tool. This cut-then-ripple approach could
-# desync video/audio and was never verified. Kept only for reference; use
-# remove_silence_segments (which Extracts and verifies). Do not re-add @mcp.tool().
-def cut_and_ripple_delete_at_times(sequence_id: str, times_seconds: list, video_track_index: int = 0, audio_track_index: int = 0):
-    """
-    RETIRED — not exposed as a tool. Use remove_silence_segments instead.
-
-    This function cuts at each time and immediately ripple deletes, which may not work
-    as expected and can desync linked audio/video.
-    """
-    sorted_times = sorted(times_seconds, reverse=True)
-
-    results = []
-    for t in sorted_times:
-        try:
-            position_ticks = int(t * TICKS_PER_SECOND)
-            command = createCommand("setPlayerPosition", {
-                "sequenceId": sequence_id,
-                "positionTicks": position_ticks
-            })
-            sendCommand(command)
-            time.sleep(0.15)
-
-            send_keystroke_to_premiere("d", ["command"])
-            time.sleep(0.1)
-
-            send_keystroke_to_premiere("e", ["command"])
-            time.sleep(0.1)
-
-            results.append({"time": t, "success": True})
-        except Exception as e:
-            results.append({"time": t, "success": False, "error": str(e)})
-
-    return {
-        "action": "cut_and_ripple_delete_at_times",
-        "processed": len(sorted_times),
-        "results": results
-    }
-
-
 @mcp.resource("config://get_instructions")
 def get_instructions() -> str:
     """Read this first! Returns information and instructions on how to use Premiere Pro and this API"""

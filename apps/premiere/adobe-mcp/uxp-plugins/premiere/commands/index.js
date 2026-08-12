@@ -579,7 +579,13 @@ const getMediaTracks = async (sequence, isVideo) => {
             let endTimeTicks = (await c.getEndTime()).ticks
             let durationTicks = (await c.getDuration()).ticks
             let durationSeconds = (await c.getDuration()).seconds
-            let name = (await c.getProjectItem()).name
+            // Not every track item has a project item — transitions and some
+            // synthetic items return null here, and an unguarded .name throws
+            // "Cannot read properties of null", taking down the WHOLE layout
+            // read (and with it verify_sequence_layout, the only authority on
+            // whether a cut landed). Same guard as getClipInfo/getSelection.
+            const projectItem = await c.getProjectItem()
+            let name = projectItem ? projectItem.name : "Unknown"
             let type = await c.getType()
             let index = k++
 

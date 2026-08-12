@@ -65,7 +65,7 @@ session, say that plainly. Do not pretend the edit was applied.
   exact residual gap. Do not close it with `set_clip_position`, split, trim, or
   delete fallback APIs.
 
-Unsafe tools for this workflow — this is the CANONICAL list (all 13 carry an
+Unsafe tools for this workflow — this is the CANONICAL list (they carry an
 `UNSAFE` docstring prefix in the server; other docs reference this list;
 `cut_and_ripple_delete_at_times` has been retired and is not registered):
 
@@ -82,6 +82,9 @@ Unsafe tools for this workflow — this is the CANONICAL list (all 13 carry an
 - `cut_at_playhead`
 - `ripple_delete`
 - `set_clip_position`
+- `send_keystroke` (arbitrary shortcut)
+- `delete_selected`
+- `move_clip`
 
 ## Verification Contract
 
@@ -89,8 +92,10 @@ Unsafe tools for this workflow — this is the CANONICAL list (all 13 carry an
 
 - `verified` — true only when the right amount was removed, NO new gaps appeared,
   and every cut lands on the same frame for video and audio.
-- `packed` — true when the whole sequence is back to back (zero gaps on any lane,
-  including a leading gap before the first clip).
+- `packed` — true when the PROGRAM bed is back to back (zero gaps on program
+  lanes, including a leading gap). Overlay-lane gaps (b-roll, titles, stingers)
+  are reported as `notes` / `overlayGapCount` and do not fail `packed`.
+  `allLanesPacked` is the strict every-lane view.
 - `avSynced` — true when video and audio cut at the same timecode everywhere
   (frame-accurate). This is the "no frame missing / audio in sync" check.
 - `nextSteps` — plain instructions for the user: what to do next, then re-validate.

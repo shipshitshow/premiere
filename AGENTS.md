@@ -45,5 +45,6 @@ This repo is an Adobe Premiere MCP editor workspace. The active product is
 ```bash
 bun run premiere:check
 bun run premiere:lint
+bun run premiere:test
 bun run format:check
 ```

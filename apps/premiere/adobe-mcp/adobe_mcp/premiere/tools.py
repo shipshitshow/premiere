@@ -7,6 +7,7 @@ for finishing work inside Premiere.
 
 from mcp.server.fastmcp import FastMCP
 
+from .audio_effects import DEFAULT_AUDIO_CLEANUP, resolve_audio_effect_labels
 from .command_runner import (
     add_audio_effect,
     add_effect_with_params,
@@ -38,10 +39,6 @@ from .command_runner import (
 
 # Lumetri Color effect match name (stable across recent Premiere versions).
 LUMETRI_MATCH_NAME = "AE.ADBE Lumetri"
-
-# Default audio-cleanup effect labels matched (case-insensitively, by substring)
-# against the live display names from getAudioEffectNames.
-DEFAULT_AUDIO_CLEANUP = ["DeNoise", "DeReverb"]
 
 
 def _unwrap(response: dict) -> dict:
@@ -378,25 +375,7 @@ def register_tools(mcp: FastMCP) -> None:
         labels = effect_labels or DEFAULT_AUDIO_CLEANUP
 
         available = _unwrap(get_audio_effect_names()).get("effects", []) or []
-        lower_available = [(name, name.lower()) for name in available]
-
-        resolved = []
-        unmatched = []
-        for label in labels:
-            needle = label.lower()
-            # Match precedence: exact, then prefix, then the requested label is a
-            # substring of an available name. We deliberately DO NOT match when an
-            # available name is a substring of the requested label — that turned
-            # "DeReverb" into "Reverb", the OPPOSITE effect.
-            match = (
-                next((name for name, low in lower_available if low == needle), None)
-                or next((name for name, low in lower_available if low.startswith(needle)), None)
-                or next((name for name, low in lower_available if needle in low), None)
-            )
-            if match:
-                resolved.append(match)
-            else:
-                unmatched.append(label)
+        resolved, unmatched = resolve_audio_effect_labels(labels, available)
 
         layout = _unwrap(get_sequence_layout(sequence_id))
         audio_tracks = layout.get("audioTracks", []) or []

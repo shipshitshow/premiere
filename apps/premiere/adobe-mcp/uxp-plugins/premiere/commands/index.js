@@ -29,6 +29,11 @@ const {consts, BLEND_MODES} = require("./consts.js")
 // Premiere uses 254016000000 ticks per second internally.
 const TICKS_PER_SECOND = 254016000000
 
+// Constants.TrackItemType: Empty=0, Clip=1, Transition=2, Preview=3, Feedback=4.
+// getTrackItems(1) should already be clips, but transitions have leaked through
+// and a transition has no project item — skip anything that is not a clip.
+const TRACK_ITEM_TYPE_CLIP = 1
+
 // Read the sequence frame rate defensively across possible API shapes.
 // Premiere 2026 sometimes fails this read entirely (the documented
 // frameRateValue/ticksPerFrame null failure) — the error is captured, not
@@ -584,9 +589,14 @@ const getMediaTracks = async (sequence, isVideo) => {
             // "Cannot read properties of null", taking down the WHOLE layout
             // read (and with it verify_sequence_layout, the only authority on
             // whether a cut landed). Same guard as getClipInfo/getSelection.
+            const type = await c.getType()
+            if (type !== TRACK_ITEM_TYPE_CLIP) {
+                continue
+            }
+            // Not every clip has a project item — some synthetic items return
+            // null here. An unguarded .name used to take down the WHOLE layout.
             const projectItem = await c.getProjectItem()
             let name = projectItem ? projectItem.name : "Unknown"
-            let type = await c.getType()
             let index = k++
 
             track.tracks.push({
@@ -1638,6 +1648,12 @@ const duplicateClip = async (command) => {
         const sourceDuration = await trackItem.getDuration()
         const sourceInPoint = await trackItem.getInPoint()
         const sourceProjectItem = await trackItem.getProjectItem()
+        if (!sourceProjectItem) {
+            throw new Error(
+                "duplicateClip : source clip has no project item " +
+                "(transition or synthetic item) — cannot insert a copy."
+            )
+        }
         const insertionTicks = BigInt(options.timeOffsetTicks)
 
         // Determine track indices for insertion

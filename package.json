@@ -8,6 +8,7 @@
     "format:check": "bunx biome ci .",
     "premiere:check": "python3 -m compileall -q apps/premiere/adobe-mcp/adobe_mcp",
     "premiere:lint": "ruff check apps/premiere/adobe-mcp/adobe_mcp",
+    "premiere:test": "python3 -m pytest apps/premiere/adobe-mcp/tests -q",
     "premiere:proxy": "cd apps/premiere/adobe-mcp/proxy-server && node proxy.js",
     "premiere:status": "curl -s http://localhost:3001/status",
     "prepare": "husky"

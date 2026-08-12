@@ -971,7 +971,7 @@ def import_media(file_paths:list):
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def split_video_clip(sequence_id: str, video_track_index: int, track_item_index: int, split_time_seconds: float):
     """
     UNSAFE for transcript cuts: splitting then deleting can desync linked
@@ -1004,7 +1004,7 @@ def split_video_clip(sequence_id: str, video_track_index: int, track_item_index:
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def split_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: int, split_time_seconds: float):
     """
     UNSAFE for transcript cuts: splitting then deleting can desync linked
@@ -1034,7 +1034,7 @@ def split_audio_clip(sequence_id: str, audio_track_index: int, track_item_index:
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def split_clip_at_time(sequence_id: str, split_time_seconds: float,
                        video_track_index: int = None, video_clip_index: int = 0,
                        audio_track_index: int = None, audio_clip_index: int = 0):
@@ -1071,7 +1071,7 @@ def split_clip_at_time(sequence_id: str, split_time_seconds: float,
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def batch_split_clips(sequence_id: str, split_times_seconds: list,
                       video_track_index: int = None, video_clip_index: int = 0,
                       audio_track_index: int = None, audio_clip_index: int = 0):
@@ -1108,7 +1108,7 @@ def batch_split_clips(sequence_id: str, split_times_seconds: list,
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def trim_video_clip(sequence_id: str, video_track_index: int, track_item_index: int,
                     new_start_seconds: float = None, new_end_seconds: float = None,
                     new_in_point_seconds: float = None, new_out_point_seconds: float = None,
@@ -1156,7 +1156,7 @@ def trim_video_clip(sequence_id: str, video_track_index: int, track_item_index: 
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def trim_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: int,
                     new_start_seconds: float = None, new_end_seconds: float = None,
                     new_in_point_seconds: float = None, new_out_point_seconds: float = None,
@@ -1201,7 +1201,7 @@ def trim_audio_clip(sequence_id: str, audio_track_index: int, track_item_index: 
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def remove_video_clip_range(sequence_id: str, video_track_index: int, track_item_index: int,
                             range_start_seconds: float, range_end_seconds: float):
     """
@@ -1231,7 +1231,7 @@ def remove_video_clip_range(sequence_id: str, video_track_index: int, track_item
 
     return sendCommand(command)
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def remove_linked_clip_range(sequence_id: str, track_item_index: int,
                              range_start_seconds: float, range_end_seconds: float,
                              video_track_index: int = 0, audio_track_index: int = 0):
@@ -1363,7 +1363,7 @@ def remove_marker(sequence_id: str, marker_index: int):
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def remove_clips(sequence_id: str, video_items: list = None, audio_items: list = None, ripple: bool = False,
                  linked: bool = True, audio_track_index: int = 0):
     """
@@ -1429,7 +1429,7 @@ def duplicate_clip(sequence_id: str, track_index: int, clip_index: int, is_video
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def move_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool, move_time_seconds: float,
               linked: bool = True, audio_track_index: int = 0):
     """
@@ -1460,7 +1460,7 @@ def move_clip(sequence_id: str, track_index: int, clip_index: int, is_video: boo
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def set_clip_position(sequence_id: str, track_index: int, clip_index: int, is_video: bool, new_start_seconds: float,
                       linked: bool = True, audio_track_index: int = 0):
     """
@@ -1531,7 +1531,7 @@ def rename_clip(sequence_id: str, track_index: int, clip_index: int, is_video: b
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def delete_clip(sequence_id: str, track_index: int, clip_index: int, is_video: bool,
                 linked: bool = True, audio_track_index: int = 0):
     """
@@ -1611,7 +1611,7 @@ def get_clip_info(sequence_id: str, track_index: int, clip_index: int, is_video:
 # These bypass the UXP API and send keystrokes directly to Premiere Pro
 # =============================================================================
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def send_keystroke(key: str, command: bool = False, shift: bool = False, option: bool = False, control: bool = False):
     """
     UNSAFE: sends an arbitrary keystroke to whichever Premiere panel is
@@ -1648,7 +1648,7 @@ def send_keystroke(key: str, command: bool = False, shift: bool = False, option:
     return {"success": True, "key": key, "modifiers": modifiers}
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def cut_at_playhead():
     """
     UNSAFE for transcript cuts: razoring at the playhead and deleting separately
@@ -1664,7 +1664,7 @@ def cut_at_playhead():
     return {"success": True, "action": "cut_at_playhead"}
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def ripple_delete():
     """
     UNSAFE for transcript cuts: a bare ripple delete is not verified and can hit
@@ -1724,7 +1724,7 @@ def deselect_all():
     return {"success": True, "action": "deselect_all"}
 
 
-@mcp.tool()
+# Not registered — unsafe for the live-cut workflow.
 def delete_selected():
     """
     UNSAFE for transcript cuts: deletes the current selection with no
@@ -2905,14 +2905,9 @@ def get_instructions() -> str:
     Keep the edit only when it returns clean: true; otherwise follow its
     nextSteps (undo to the previous clean baseline).
 
-    DO NOT use the following for transcript cuts — they desync linked video/audio
-    and/or leave gaps, and they carry an UNSAFE docstring prefix:
-      split_video_clip, split_audio_clip, split_clip_at_time, batch_split_clips,
-      trim_video_clip, trim_audio_clip,
-      remove_video_clip_range, remove_linked_clip_range, remove_clips,
-      delete_clip, cut_at_playhead, ripple_delete,
-      set_clip_position (can stretch clips; never use it to close gaps),
-      send_keystroke, delete_selected, move_clip.
+    The split / trim / delete / set_clip_position / send_keystroke helpers are
+    NOT registered as MCP tools. Do not look for them. Use
+    remove_silence_segments only.
     Never close a residual gap with split/trim/delete/set_clip_position. If a gap
     remains after a cut and the close_gap_recovery preconditions do not hold,
     STOP and report it for manual packing with its location from the
@@ -2952,7 +2947,8 @@ def get_instructions() -> str:
     - add_black_and_white_effect, add_gaussian_blur_effect, add_tint_effect, add_motion_blur_effect
     - append_video_transition - add transitions between clips
     - set_video_clip_properties - opacity and blend mode
-    - premiere_apply_lumetri_correction, premiere_clean_audio_pipeline (manual-finish helpers)
+    - premiere_apply_lumetri_correction, premiere_clean_audio_pipeline (clip-level)
+    - premiere_get_audio_tracks - track inventory; mixer inserts are NOT available
 
     Audio:
     - set_audio_track_mute - mute/unmute audio tracks

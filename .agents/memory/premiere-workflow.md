@@ -28,10 +28,10 @@ Track-level Audio Track Mixer insert chain on the dialogue track, after the cut:
 3. DeReverb — Amount `20.0%`
 4. Vocal Enhancer — Mode `Low Tone`
 
-MCP can apply clip-level DeNoise/DeReverb (`premiere_clean_audio_pipeline`) and
-add clip effects (`premiere_add_effect`). It cannot set Audio Track Mixer
-inserts, track-level params, Vocal Enhancer mode, or Enhance Speech. Do not
-claim this preset was fully applied by automation.
+`premiere_get_audio_tracks` lists tracks and reports
+`mixerInsertsSupported: false`. Premiere UXP `AudioTrack` has name/mute/clips
+only — not mixer inserts. Clip-level DeNoise/DeReverb is
+`premiere_clean_audio_pipeline`. Do not claim the house mixer preset was applied.
 
 ## Known 2026-06-23 livestream ranges
 

@@ -21,6 +21,7 @@ from .command_runner import (
     export_sequence,
     export_transcript,
     get_audio_effect_names,
+    get_audio_track_info,
     get_clip_effects,
     get_effect_names,
     get_export_file_extension,
@@ -322,6 +323,29 @@ def register_tools(mcp: FastMCP) -> None:
         video/audio end-sync from this same data.
         """
         return get_sequence_layout(sequence_id)
+
+    @mcp.tool()
+    def premiere_get_audio_tracks(sequence_id: str) -> dict:
+        """List audio tracks on a sequence (name, mute, clip count). READ-ONLY.
+
+        Also reports mixerInsertsSupported=false. Premiere's UXP AudioTrack API
+        has no Audio Track Mixer insert slots, track-level effect parameters,
+        Vocal Enhancer mode, or Enhance Speech. The house dialogue preset
+        (Parametric EQ + DeNoise 20% + DeReverb 20% + Vocal Enhancer Low Tone)
+        stays a manual mixer step. Use premiere_clean_audio_pipeline for the
+        clip-level DeNoise/DeReverb subset only.
+        """
+        payload = _unwrap(get_audio_track_info(sequence_id))
+        payload["houseMixerPreset"] = {
+            "manual": True,
+            "chain": [
+                "Parametric EQ (Low Shelf Frequency ~110.39 Hz)",
+                "DeNoise Amount 20.0%",
+                "DeReverb Amount 20.0%",
+                "Vocal Enhancer Mode Low Tone",
+            ],
+        }
+        return payload
 
     @mcp.tool()
     def premiere_apply_lumetri_correction(

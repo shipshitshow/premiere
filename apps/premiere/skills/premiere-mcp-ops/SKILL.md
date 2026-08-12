@@ -65,9 +65,8 @@ session, say that plainly. Do not pretend the edit was applied.
   exact residual gap. Do not close it with `set_clip_position`, split, trim, or
   delete fallback APIs.
 
-Unsafe tools for this workflow — this is the CANONICAL list (they carry an
-`UNSAFE` docstring prefix in the server; other docs reference this list;
-`cut_and_ripple_delete_at_times` has been retired and is not registered):
+Unsafe helpers are **not registered** as MCP tools. An agent cannot call them.
+UXP handlers still exist inside the plugin; do not re-add `@mcp.tool()` for:
 
 - `split_video_clip`
 - `split_audio_clip`
@@ -82,9 +81,12 @@ Unsafe tools for this workflow — this is the CANONICAL list (they carry an
 - `cut_at_playhead`
 - `ripple_delete`
 - `set_clip_position`
-- `send_keystroke` (arbitrary shortcut)
+- `send_keystroke`
 - `delete_selected`
 - `move_clip`
+
+`cut_and_ripple_delete_at_times` was deleted. The list lives in
+`adobe_mcp/premiere/unsafe_tools.py`.
 
 ## Verification Contract
 
@@ -144,18 +146,17 @@ clip-level cleanup:
 
 Observed mixer parameter: Parametric EQ `Low Shelf Frequency` around `110.39 Hz`.
 
-Current automation limits:
+Current automation limits (verified against Premiere UXP `AudioTrack` in 25.6+):
 
-- `premiere_clean_audio_pipeline` applies DeNoise/DeReverb across audio clips.
+- `premiere_get_audio_tracks` lists name / mute / clip count and returns
+  `mixerInsertsSupported: false`. That is the API ceiling, not a missing wrapper.
+- `premiere_clean_audio_pipeline` applies DeNoise/DeReverb across **clips**.
 - `premiere_add_effect` can add audio effects to individual audio clips.
-- The current MCP tool surface does not safely control Audio Track Mixer insert
-  slots, track-level effect parameters, Vocal Enhancer mode, or Premiere's speech
-  enhancement UI.
+- There is no UXP for Audio Track Mixer insert slots, track-level effect
+  parameters, Vocal Enhancer mode, or Enhance Speech.
 
-If asked to apply the "proper audio edit," first check whether new track-mixer
-tools are available. If they are not, say that only the clip-level subset can be
-automated and ask the user to do the Audio Track Mixer preset manually, or extend
-the UXP bridge before claiming the full preset is applied. Always verify by ear.
+If asked to apply the house mixer preset, say so and ask the user to do the
+insert chain in the Audio Track Mixer. Do not claim it was applied. Verify by ear.
 
 ## Gap Handling
 

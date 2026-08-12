@@ -1,32 +1,19 @@
-# Session Documentation
+# Session notes
 
-This directory contains daily session documentation for the Premiere project.
+Local session notes for this repo. Prefer GitHub issues + `.agents/memory/`
+for durable decisions.
 
-## File Naming Convention
+## Naming
 
-```
-YYYY-MM-DD.md
-```
+`YYYY-MM-DD.md` for a day. Suffixed files (`YYYY-MM-DD-topic.md`) are
+one-off postmortems.
 
-One file per day, with multiple sessions documented within the same file.
+## Keep
 
-## Session Structure
+- `2026-06-11-premiere-cut-failure.md` — why we never invent fallback sequences
+- `2026-06-23-premiere-loop-cut.md` — Close Gap recovery + the `432.15` range
 
-Each session entry includes:
-- Session number and title
-- System flow diagram
-- Tasks completed (checklist)
-- Files changed
-- Key decisions with rationale
-- Next steps
+## Stale
 
-## Sessions Index
-
-| Date | Sessions | Summary |
-|------|----------|---------|
-| 2026-02-04 | 2 | Video processing pipeline (260203), Skills discovery for Adobe Premiere |
-
-## Related Documentation
-
-- `.agent/sessions/` - Legacy session files
-- `mcp/adobe-premiere-mcp/` - Adobe Premiere MCP integration
+Feb 2026 notes describe a Python/FFmpeg self-editor and `mcp/adobe-premiere-mcp/`
+that are no longer in this tree. Git history is the archive.

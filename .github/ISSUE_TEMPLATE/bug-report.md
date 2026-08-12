@@ -28,7 +28,8 @@ What actually happened?
 
 - OS:
 - Python version:
-- FFmpeg version:
+- Premiere Pro version:
+- Proxy / UXP plugin connected? (`bun run premiere:status`)
 - Relevant command or workflow:
 
 ## Notes

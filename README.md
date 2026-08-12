@@ -82,7 +82,9 @@ After a cut, read the top-level flags:
 
 Treat `verified: false` / `null` as **not confirmed**. The A/V check tolerates
 only sub-frame rounding (half a frame) — a full one-frame drift is reported as a
-misalignment and fails `verified`/`avSynced`. Standalone helpers:
+misalignment and fails `verified`/`avSynced`. The full contract (unsafe tools,
+program vs overlay lanes, Close Gap constraints) is
+`apps/premiere/skills/premiere-mcp-ops/SKILL.md`. Standalone helpers:
 
 - `premiere_preflight` — one-call health check of the proxy/plugin/project chain.
 - `verify_sequence_layout` — per-lane gaps, `avMisalignments`, end-skew, warnings.
@@ -122,7 +124,7 @@ pip install -e .
 
 # 2. Install proxy dependencies
 cd proxy-server
-npm install
+bun install
 ```
 
 Enable **UXP Developer Mode** in Premiere (Settings > Development), then load
@@ -163,6 +165,7 @@ is up, `premiere_preflight()` from the agent session confirms the whole chain.
 ```bash
 bun run premiere:check     # Python compile check
 bun run premiere:lint      # ruff (repo policy from pyproject.toml)
+bun run premiere:test      # plan/layout/verify unit tests
 bun run format:check       # Biome formatting
 ```
 

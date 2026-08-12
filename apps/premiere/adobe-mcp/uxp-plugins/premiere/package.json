@@ -3,5 +3,5 @@
   "version": "0.85.0",
   "description": "Adobe Premiere MCP Agent Plugin.",
   "author": "Mike Chambers (mikechambers@gmail.com)",
-  "license": "MIT"
+  "license": "Apache-2.0"
 }

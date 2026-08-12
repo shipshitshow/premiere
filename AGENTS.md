@@ -6,7 +6,7 @@ This repo is an Adobe Premiere MCP editor workspace. The active product is
 ## Read First
 
 1. `README.md`
-2. `.agents/memory/premiere-workflow.md`
+2. `.agents/memory/MEMORY.md`
 3. `apps/premiere/skills/premiere-mcp-ops/SKILL.md`
 
 ## Active Paths

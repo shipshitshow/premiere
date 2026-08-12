@@ -10,6 +10,7 @@ Codex should prefer these checks:
 ```bash
 bun run premiere:check
 bun run premiere:lint
+bun run premiere:test
 bun run format:check
 ```
 

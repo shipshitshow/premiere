@@ -5,8 +5,8 @@ editor repo.
 
 ## Memory
 
-Read `.agents/memory/premiere-workflow.md` before editing workflow code or
-operating the live Premiere MCP path.
+Read `.agents/memory/MEMORY.md`, then `premiere-workflow.md` for house facts.
+The live-cut contract is `apps/premiere/skills/premiere-mcp-ops/SKILL.md`.
 
 ## Sessions
 

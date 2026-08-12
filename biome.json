@@ -26,7 +26,6 @@
       ".claude/settings.local.json",
       "apps/premiere/adobe-mcp/uxp-plugins/premiere/socket.io.js",
       "apps/premiere/adobe-mcp/uxp-plugins/premiere/main.js",
-      "apps/premiere/adobe-mcp/uxp-plugins/premiere/commands",
       "apps/premiere/scripts/legacy-extendscript"
     ]
   }

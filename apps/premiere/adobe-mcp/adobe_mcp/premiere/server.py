@@ -481,7 +481,7 @@ def set_active_sequence(sequence_id: str):
     return sendCommand(command)
 
 
-@mcp.tool()
+# Not registered — creating a sequence is not part of the cut workflow.
 def create_sequence_from_media(item_names: list[str], sequence_name: str = "default"):
     """
     Creates a new sequence from the specified project items, placing clips on the timeline in the order they are provided.
@@ -2937,7 +2937,8 @@ def get_instructions() -> str:
     - create_project, open_project, save_project, save_project_as
 
     Sequence Management:
-    - create_sequence_from_media, set_active_sequence
+    - set_active_sequence
+    Creating a new sequence / subsequence is not an MCP tool. Do it in Premiere.
 
     Media & Timeline:
     - import_media - import files into project

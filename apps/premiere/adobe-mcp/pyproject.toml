@@ -8,14 +8,14 @@ version = "1.0.0"
 description = "MCP server for editing inside Adobe Premiere Pro"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     {name = "Adobe MCP Contributors"},
 ]
 dependencies = [
     "mcp>=1.1.1,<2",
     "python-socketio>=5.0.0",
-    "websocket-client>=1.8.0",
+    "pillow>=12.3.0",
 ]
 
 [project.scripts]

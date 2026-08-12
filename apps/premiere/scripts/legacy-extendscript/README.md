@@ -15,8 +15,7 @@ automation surface that the UXP plugin replaces.
 | `add-markers.jsx` | Add timeline markers. |
 | `export-sequence.jsx` | Export a sequence via the render queue. |
 
-To do any of these through the supported path, use the MCP tools instead
-(e.g. `premiere_create_sequence`, `premiere_export_sequence`,
-`premiere_insert_mogrt`, transcript import/export tools). Do not wire these
-`.jsx` files back into the live workflow without an explicit decision to revive
-the ExtendScript path.
+To do any of these through the supported path, use the live Premiere UI or the
+remaining MCP helpers (`premiere_export_sequence`, `premiere_insert_mogrt`,
+transcript import/export). Sequence creation is not an MCP tool. Do not wire
+these `.jsx` files back into the live workflow.

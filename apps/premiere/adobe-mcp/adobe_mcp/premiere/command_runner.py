@@ -6,7 +6,7 @@ helpers expose the lower-level UXP command names used by the plugin.
 
 import os
 
-from adobe_mcp.shared import socket_client
+from adobe_mcp.shared import createCommand, init, sendCommand, socket_client
 
 PROXY_URL = os.environ.get("PROXY_URL", "http://localhost:3001")
 PROXY_TIMEOUT = int(os.environ.get("PROXY_TIMEOUT", "120"))
@@ -20,13 +20,8 @@ def run_command(action: str, options: dict) -> dict:
     the live connection; it also lets this module work standalone.
     """
     socket_client.configure(app="premiere", url=PROXY_URL, timeout=PROXY_TIMEOUT)
-    return socket_client.send_message_blocking(
-        {
-            "application": "premiere",
-            "action": action,
-            "options": options,
-        }
-    )
+    init("premiere", socket_client)
+    return sendCommand(createCommand(action, options))
 
 
 def export_sequence(
@@ -283,20 +278,6 @@ def clear_sequence_in_out_points(sequence_id: str) -> dict:
     )
 
 
-def create_subsequence(
-    sequence_id: str,
-    ignore_track_targeting: bool = True,
-) -> dict:
-    """Create a subsequence from the current sequence."""
-    return run_command(
-        "createSubsequence",
-        {
-            "sequenceId": sequence_id,
-            "ignoreTrackTargeting": ignore_track_targeting,
-        },
-    )
-
-
 def add_handles_to_clip(
     sequence_id: str,
     track_index: int,
@@ -315,16 +296,6 @@ def add_handles_to_clip(
             "inPointFrames": in_point_frames,
             "outPointFrames": out_point_frames,
             "isVideo": is_video,
-        },
-    )
-
-
-def create_empty_sequence(sequence_name: str) -> dict:
-    """Create an empty sequence."""
-    return run_command(
-        "createSequence",
-        {
-            "sequenceName": sequence_name,
         },
     )
 

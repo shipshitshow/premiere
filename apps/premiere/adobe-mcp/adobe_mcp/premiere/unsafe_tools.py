@@ -6,7 +6,8 @@ because an agent used split/trim/delete/`set_clip_position` instead of
 `remove_silence_segments`.
 """
 
-# Canonical unregistered surface. Keep in sync with server.py (no @mcp.tool).
+# Canonical unregistered surface. Keep in sync with server.py / tools.py
+# (no @mcp.tool).
 UNREGISTERED_UNSAFE_TOOLS = (
     "split_video_clip",
     "split_audio_clip",
@@ -24,4 +25,12 @@ UNREGISTERED_UNSAFE_TOOLS = (
     "send_keystroke",
     "delete_selected",
     "move_clip",
+)
+
+# 2026-06-11 class: agents created alternate sequences instead of cutting
+# the requested one. Not registered. Create sequences in Premiere by hand.
+UNREGISTERED_SEQUENCE_TOOLS = (
+    "create_sequence_from_media",
+    "premiere_create_sequence",
+    "premiere_create_subsequence",
 )

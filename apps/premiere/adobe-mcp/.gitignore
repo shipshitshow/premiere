@@ -32,7 +32,6 @@ yarn-debug.log*
 yarn-error.log*
 package-lock.json
 yarn.lock
-!proxy-server/package-lock.json
 
 # IDE
 .vscode/

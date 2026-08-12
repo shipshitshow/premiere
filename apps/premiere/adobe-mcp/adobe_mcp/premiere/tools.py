@@ -16,8 +16,6 @@ from .command_runner import (
     add_transition_to_start,
     add_video_effect,
     clear_sequence_in_out_points,
-    create_empty_sequence,
-    create_subsequence,
     export_sequence,
     export_transcript,
     get_audio_effect_names,
@@ -249,14 +247,6 @@ def register_tools(mcp: FastMCP) -> None:
         return clear_sequence_in_out_points(sequence_id)
 
     @mcp.tool()
-    def premiere_create_subsequence(
-        sequence_id: str,
-        ignore_track_targeting: bool = True,
-    ) -> dict:
-        """Create a subsequence from the current sequence."""
-        return create_subsequence(sequence_id, ignore_track_targeting)
-
-    @mcp.tool()
     def premiere_add_handles(
         sequence_id: str,
         track_index: int,
@@ -274,11 +264,6 @@ def register_tools(mcp: FastMCP) -> None:
             out_frames,
             is_video,
         )
-
-    @mcp.tool()
-    def premiere_create_sequence(sequence_name: str) -> dict:
-        """Create a new empty sequence."""
-        return create_empty_sequence(sequence_name)
 
     @mcp.tool()
     def premiere_get_selection(sequence_id: str) -> dict:

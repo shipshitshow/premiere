@@ -216,6 +216,9 @@ Do not create:
 
 If a recovery path requires any of the above, stop and ask the user first.
 
+`create_sequence_from_media`, `premiere_create_sequence`, and
+`premiere_create_subsequence` are not registered as MCP tools.
+
 ## Hard Stop Conditions
 
 Stop immediately if any of these happen:

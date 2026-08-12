@@ -19,21 +19,16 @@ From the repo root:
 ```bash
 bun run premiere:check     # Python compile check
 bun run premiere:lint      # ruff (policy in pyproject.toml, enforced in CI)
+bun run premiere:test      # plan/layout/verify unit tests
 bun run format:check       # biome formatting (enforced in CI)
 ```
 
 ## Premiere Workflow Safety
 
-- The live Premiere sequence is the source of truth.
-- Use `remove_silence_segments` for transcript-based removal ranges. It extracts
-  (ripple-deletes) each range so the gap closes in the same A/V-synced op, then
-  verifies the layout.
-- Verify timeline changes after each cut batch; treat a `verified: false`/`null`
-  result as not confirmed.
-- Stop if the active sequence, Premiere focus, proxy state, or UXP connection is
-  uncertain.
-- Do not create rendered replacements, proxy edits, or alternate sequences unless
-  the user explicitly asks for that.
+Follow `apps/premiere/skills/premiere-mcp-ops/SKILL.md`. Short version: live
+sequence is the source of truth; dry-run then Extract; treat `verified: false`
+/`null` as not confirmed; do not invent fallback sequences or unsafe split/trim
+APIs.
 
 ## Git
 

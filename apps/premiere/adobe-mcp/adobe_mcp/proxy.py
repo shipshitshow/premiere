@@ -9,11 +9,14 @@ def main():
     """Launch the Node.js proxy server."""
     proxy_dir = os.path.join(os.path.dirname(__file__), "..", "proxy-server")
 
-    # Check if node_modules exists
     node_modules = os.path.join(proxy_dir, "node_modules")
     if not os.path.exists(node_modules):
-        print("Installing proxy server dependencies...")
-        subprocess.run(["npm", "install"], cwd=proxy_dir, check=True)
+        print(
+            "Proxy dependencies missing. From the repo root run:\n"
+            "  cd apps/premiere/adobe-mcp/proxy-server && bun install",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Run the proxy server
     print("Starting Premiere MCP proxy server...")

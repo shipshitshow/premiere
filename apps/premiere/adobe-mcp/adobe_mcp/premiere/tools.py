@@ -425,10 +425,3 @@ def register_tools(mcp: FastMCP) -> None:
                 "Confirm the result by ear in Premiere."
             ),
         }
-
-
-def create_premiere_tools_server(name: str = "Premiere Tools") -> FastMCP:
-    """Create a standalone MCP server with the additional Premiere tools."""
-    mcp = FastMCP(name, log_level="ERROR")
-    register_tools(mcp)
-    return mcp

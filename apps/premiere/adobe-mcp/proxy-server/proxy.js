@@ -145,6 +145,7 @@ function sendToApplication(packet) {
   return false
 }
 
-server.listen(PORT, () => {
-  console.log(`Premiere MCP command proxy running on ws://localhost:${PORT}`)
+const HOST = process.env.PROXY_HOST || '127.0.0.1'
+server.listen(PORT, HOST, () => {
+  console.log(`Premiere MCP command proxy running on ws://${HOST}:${PORT}`)
 })

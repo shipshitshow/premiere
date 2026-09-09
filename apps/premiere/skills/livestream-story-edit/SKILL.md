@@ -79,4 +79,5 @@ Sections:
 After the story structure is approved:
 
 - use `premiere-transcript-edit` to derive precise keep/remove ranges
-- use `premiere-mcp-ops` if the user wants the cuts applied in Premiere
+- use `premiere-weekly-edit` to apply cuts through computer use; use
+  `premiere-mcp-ops` only when the user explicitly requests the Adobe MCP route

@@ -5,7 +5,9 @@ description: Safely operate this repo's adobe-premiere-mcp workflow. Use when th
 
 # Premiere MCP Ops
 
-Use this skill for the fragile, repo-specific Premiere control path.
+Use this skill for explicitly requested Adobe MCP operation or bridge development.
+For Vincent’s default computer-use editing, use [premiere-weekly-edit](../premiere-weekly-edit/SKILL.md).
+The following preconditions and tool contract apply to the MCP route only.
 
 ## Preconditions
 

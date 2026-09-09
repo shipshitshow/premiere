@@ -1,0 +1,4 @@
+interface:
+  display_name: "Premiere Shorts and Delivery"
+  short_description: "Create captioned vertical and 16:9 shorts"
+  default_prompt: "Use $premiere-shorts-delivery to prepare captioned shorts in vertical and 16:9 with a folder for each."

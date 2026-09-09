@@ -40,14 +40,14 @@ Ignore empty `text` values and disfluency-only filler entries when planning.
 3. Build a keep-plan with section labels and source ranges.
 4. Tighten the selection to hit the requested runtime.
 5. Convert keep ranges into removal ranges.
-6. If the user wants execution and Premiere MCP is available, hand off the removal
-   ranges to the Premiere cutting workflow.
+6. For authorized execution, hand the ranges to `premiere-weekly-edit` for computer
+   use, or `premiere-mcp-ops` only for an explicit Adobe MCP request.
 
 ## End-to-end execution (after approval)
 
-Hand the approved removal ranges to `premiere-mcp-ops`. That skill is the
-canonical cut contract (preflight, dry-run, Extract, verify, Close Gap only).
-Do not restate or invent a second cut path here.
+Hand approved ranges to `premiere-weekly-edit` for native editing and verification.
+For explicitly requested MCP use, `premiere-mcp-ops` defines its preflight, dry-run,
+Extract and verification contract. Preserve the user’s chosen control method.
 
 ## Output Shape
 
@@ -75,7 +75,8 @@ Remove:
 ## Execution Rules
 
 - Do not cut blindly from transcript text alone if the user only asked for planning.
-- Wait for approval before asking the Premiere MCP layer to change the timeline.
+- Honor requested plan validation before changing the timeline; do not ask again
+  when the current conversation already authorizes executing that plan.
 - If the user wants a shorter or more technical cut, revise the keep-plan first, then regenerate removal ranges.
 
 ## References

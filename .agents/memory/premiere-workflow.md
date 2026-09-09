@@ -1,11 +1,12 @@
 ---
-last_verified: 2026-08-12
+last_verified: 2026-09-09
 ---
 
 # Premiere Workflow Memory
 
-Durable house facts. The **live-cut contract** lives in
-`apps/premiere/skills/premiere-mcp-ops/SKILL.md` — do not copy it here.
+Durable house facts. Current computer-use instructions live in
+`apps/premiere/skills/premiere-weekly-edit/SKILL.md` and the sibling shorts skill.
+The MCP cut contract applies only to explicitly requested MCP operation.
 
 ## Source of truth
 
@@ -19,9 +20,9 @@ timeline, or generated alternate sequence unless the user explicitly asks.
 - Legacy ExtendScript: quarantined at `apps/premiere/scripts/legacy-extendscript`
 - Old self-editing Python app: git history only
 
-## House audio polish (manual)
+## Historical audio preset (observed before September 2026)
 
-Track-level Audio Track Mixer insert chain on the dialogue track, after the cut:
+Historical reference only, superseded for the 260908 edit by the chain below:
 
 1. Parametric EQ — observed `Low Shelf Frequency` around `110.39 Hz`
 2. DeNoise — Amount `20.0%`
@@ -46,3 +47,19 @@ native Close Gap pass; the loop cut needed two.
 - `PREMIERE_CLOSE_GAP_KEY` — default `w` (this workspace). Premiere's default
   `W` is Ripple Trim Next Edit; `close_gap_recovery` hard-stops if content ticks
   change, but the first press already happened.
+
+## September computer-use workflow
+
+Vincent reaffirmed native computer use on 2026-09-09. Read the repository skills,
+including `premiere-weekly-edit/references/native-control.md`, before UI work.
+The full edit record and frame tables live in that skill's
+`references/260908-edit-record.md`.
+
+260908 audio: Parametric EQ 80 Hz high-pass / 24 dB per octave, DeNoise 20%,
+DeReverb 20%, single-band compressor −18 dB / 3:1 / 5 ms / 120 ms / +5 dB,
+true-peak limiter −1 dB. Lumetri: exposure +0.15, contrast +5, highlights −18,
+shadows +12, whites −8. Assess the new recording before reusing settings.
+Caption style: Poppins ExtraBold, short uppercase phrases, white / black 5 px
+outer stroke, selected green #00E83F keywords; 84 px vertical and 72 px wide.
+These are applied settings with playback review still pending, not a claim of
+final user approval or measured audio quality.

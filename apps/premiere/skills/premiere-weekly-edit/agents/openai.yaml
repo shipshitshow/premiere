@@ -1,0 +1,4 @@
+interface:
+  display_name: "Weekly Premiere Edit"
+  short_description: "Edit the weekly livestream in native Premiere"
+  default_prompt: "Use $premiere-weekly-edit to prepare and edit this week’s livestream in Premiere."

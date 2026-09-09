@@ -1,18 +1,28 @@
+---
+last_verified: 2026-09-09
+---
+
 # Premiere repo memory
 
-This repo edits the **live Adobe Premiere Pro timeline** through Adobe MCP.
-There is no parallel FFmpeg / self-editing Python app in the working tree.
+Vincent's default editing route is **computer use in installed Premiere**, without
+Adobe MCP (reaffirmed 2026-09-09). The live timeline remains the source of truth.
+The bridge implementation stays available for explicitly requested MCP work.
 
 ## Start here
 
-1. `README.md` — product + setup
-2. `apps/premiere/skills/premiere-mcp-ops/SKILL.md` — **canonical live-cut contract**
-3. `apps/premiere/adobe-mcp/PREMIERE_MCP_WORKFLOW.md` — operator runbook
-4. `.agents/memory/premiere-workflow.md` — durable house facts (audio preset, known ranges)
+1. `README.md` and `AGENTS.md` — routing and preservation rules.
+2. `apps/premiere/skills/premiere-weekly-edit/SKILL.md` — native workflow.
+3. `apps/premiere/skills/premiere-shorts-delivery/SKILL.md` — both orientations,
+   visible captions, per-short folders and export review.
+4. `.agents/memory/premiere-workflow.md` — dated house facts and reference links.
 
-## Rules
+Keep the full `livestream` intact with all A/V tracks locked. Edit only requested
+edit/short sequences. Verify source selections, sync, packing, locks and duration
+after small batches. No external `.prproj` rewrite or rendered replacement.
+Honor requested plan and playback review; do not export for a visual pass before
+that review. Native macOS authorization does not bypass tool rules.
 
-- Live sequence is the source of truth. Verify after every cut.
-- Preflight → dry-run plan → user approval → Extract → verify.
-- The only allowed gap recovery is `close_gap_recovery`, and only for tiny native Extract gaps.
-- Do not create alternate sequences or rendered assemblies unless asked.
+Repository skills are canonical; synchronize their installed Codex copies after
+updates. The 260908 record is an example, never next week's cut plan.
+For explicitly requested MCP operation, read `premiere-mcp-ops/SKILL.md`; its
+preflight/dry-run/Extract/verification contract still applies to that route.

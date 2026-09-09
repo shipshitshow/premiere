@@ -1,12 +1,14 @@
-# Adobe Premiere MCP Editor
+# Adobe Premiere Editor
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Premiere MCP Check](https://github.com/shipshitshow/premiere/actions/workflows/ci.yml/badge.svg)](https://github.com/shipshitshow/premiere/actions/workflows/ci.yml)
 
-Transcript-driven editing for the **live Adobe Premiere Pro timeline**, through a
-local MCP server + Socket.IO proxy + Premiere UXP plugin. An MCP-capable agent
-removes dead filler from a sequence and **every cut is verified** for A/V sync,
-missing frames, and back-to-back packing before it is trusted.
+Transcript-driven editing for the **live Adobe Premiere Pro timeline**. Weekly
+production uses native computer use, with repository skills documenting project
+preservation, editorial planning, audio, color, captions and delivery. The repo
+also contains an MCP server + Socket.IO proxy + Premiere UXP plugin for explicitly
+requested bridge operation. Verify every edit for source selection, A/V sync and
+program continuity before trusting it.
 
 Built and used by the [**Ship Sh!t Show**](https://www.youtube.com/@shipshitshow)
 to cut technical livestreams down to publishable videos.
@@ -16,6 +18,27 @@ to cut technical livestreams down to publishable videos.
 > pipeline. It drives the real Premiere UI and then reads the result back to
 > confirm what actually happened.
 
+## Weekly editing through computer use
+
+**Current editing preference (2026-09-09): operate installed Premiere through
+computer use, without the Adobe MCP bridge.** The MCP implementation and its
+route-specific documentation below remain available for bridge development or
+an explicit MCP request; they are not prerequisites for native editing.
+
+- [Weekly edit skill](apps/premiere/skills/premiere-weekly-edit/SKILL.md): project
+  naming, locked full livestream, transcript planning, native edits, sound and light.
+- [Shorts and delivery skill](apps/premiere/skills/premiere-shorts-delivery/SKILL.md):
+  speaker framing, vertical and 16:9 versions, corrected visible captions and folders.
+- [Native panel operation](apps/premiere/skills/premiere-weekly-edit/references/native-control.md):
+  focus, selection, dialogs and the recovery lessons from the actual session.
+- [260908 edit record](apps/premiere/skills/premiere-weekly-edit/references/260908-edit-record.md):
+  actual cuts, effects, caption choices, preservation checks and remaining review.
+
+The repository skills are the maintained source. To install them in Codex, copy
+both skill directories to `~/.codex/skills/` without overwriting unrelated skills.
+Re-sync these two installed copies whenever their repository instructions change.
+Media, Premiere projects and exports remain in the dated production folders.
+
 ## Why this exists
 
 Cutting a 3-hour livestream by transcript is easy to get subtly wrong: a cut that
@@ -24,11 +47,11 @@ a tool that reports success while the timeline never changed. Those failures are
 invisible until you scrub the export.
 
 So the point of this repo is not tool count — it is the **verification layer**.
-The one supported cut path frame-snaps every range, cuts with Premiere's native
+The MCP cut path frame-snaps every range, cuts with Premiere's native
 **Extract** (which closes the gap in the same A/V-synced operation), and then
 re-reads the sequence to prove the edit landed correctly.
 
-## What it does
+## What the MCP implementation does
 
 - Exposes an `adobe-premiere` MCP server to MCP-capable agents (Claude Code, etc.)
 - Connects that server to Premiere through a local Socket.IO proxy (`localhost:3001`)
@@ -36,7 +59,7 @@ re-reads the sequence to prove the edit landed correctly.
 - Edits the **active sequence** in the live Premiere UI
 - Verifies every transcript cut and reports the real state, not just a success flag
 
-## The supported workflow: preflight → plan → cut → verify
+## MCP workflow: preflight → plan → cut → verify
 
 `remove_silence_segments` is the only safe cut primitive, and it is wrapped in
 a check-first flow so nothing executes sight-unseen:
@@ -143,7 +166,7 @@ with `ModuleNotFoundError`, re-run `.venv/bin/pip install -e apps/premiere/adobe
 (the editable install goes stale if the workspace path changes). Once everything
 is up, `premiere_preflight()` from the agent session confirms the whole chain.
 
-## Safety rules
+## MCP safety rules
 
 - Edit the active Premiere sequence, then verify it — success flags are untrusted
   until the clip layout actually changes.

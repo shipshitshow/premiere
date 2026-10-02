@@ -1,3 +1,5 @@
+> **Historical workflow — retired October 2, 2026.** New Ship Sh!t Show editing uses Tesseract through GPT/Claude and its installed plugin. See the [current editing handbook](https://github.com/shipshitshow/vault/blob/master/production/editing-workflow.md) and [viewer editing skills](https://github.com/shipshitshow/skills). This repository is retained for provenance, existing media/projects and historical safety recipes. Do not use its native controls as Tesseract instructions.
+
 # Adobe Premiere MCP Editor
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
